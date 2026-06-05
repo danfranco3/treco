@@ -1,3 +1,3 @@
-from treco.client import TrecoClient
+from .client import TrecoClient
 
 __all__ = ["TrecoClient"]
