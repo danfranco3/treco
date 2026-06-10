@@ -1,9 +1,13 @@
+import asyncio
 import hashlib
+import json
 import uuid
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +51,7 @@ async def post_event(
     db: AsyncSession = Depends(get_db),
 ):
     agent = await _resolve_agent(x_agent_key, db)
+    agent.last_seen_at = datetime.utcnow()
 
     event = AgentEvent(
         id=str(uuid.uuid4()),
@@ -68,6 +73,18 @@ async def post_event(
     elif req.event_type in ("done", "error"):
         agent.status = "idle" if req.event_type == "done" else "error"
         agent.current_ticket_id = None
+    elif req.event_type == "criterion_checked" and req.criterion_id:
+        from app.models.ticket import Ticket
+        ticket_result = await db.execute(select(Ticket).where(Ticket.id == req.ticket_id))
+        ticket = ticket_result.scalar_one_or_none()
+        if ticket and ticket.acceptance_criteria:
+            criteria = list(ticket.acceptance_criteria)
+            for c in criteria:
+                if c.get("id") == req.criterion_id:
+                    c["done"] = True
+                    break
+            ticket.acceptance_criteria = criteria
+            db.add(ticket)
 
     await db.commit()
     return {"id": event.id}
@@ -99,3 +116,82 @@ async def get_ticket_cost(ticket_id: str, db: AsyncSession = Depends(get_db)):
         total_tokens_out=tokens_out or 0,
         event_count=count or 0,
     )
+
+
+@router.get("/agent/{agent_id}")
+async def get_agent_events(
+    agent_id: str,
+    limit: int = 200,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(AgentEvent)
+        .where(AgentEvent.agent_id == agent_id)
+        .order_by(AgentEvent.created_at.desc())
+        .limit(min(limit, 500))
+    )
+    return result.scalars().all()
+
+
+@router.get("/")
+async def list_workspace_events(
+    workspace_id: str,
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(AgentEvent)
+        .where(AgentEvent.workspace_id == workspace_id)
+        .order_by(AgentEvent.created_at.desc())
+        .limit(min(limit, 500))
+    )
+    return result.scalars().all()
+
+
+def _event_to_dict(event: AgentEvent) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "agent_id": event.agent_id,
+        "ticket_id": event.ticket_id,
+        "workspace_id": event.workspace_id,
+        "event_type": event.event_type,
+        "criterion_id": event.criterion_id,
+        "tokens_in": event.tokens_in,
+        "tokens_out": event.tokens_out,
+        "model": event.model,
+        "payload": event.payload,
+        "created_at": event.created_at.isoformat(),
+    }
+
+
+@router.get("/stream")
+async def event_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
+    async def generator():
+        # Bootstrap: send last 50 events so fresh page loads have context
+        result = await db.execute(
+            select(AgentEvent)
+            .where(AgentEvent.workspace_id == workspace_id)
+            .order_by(AgentEvent.created_at.desc())
+            .limit(50)
+        )
+        bootstrap = list(reversed(result.scalars().all()))
+        for event in bootstrap:
+            yield {"data": json.dumps(_event_to_dict(event))}
+
+        last_created = bootstrap[-1].created_at if bootstrap else None
+
+        while True:
+            await asyncio.sleep(0.5)
+            q = (
+                select(AgentEvent)
+                .where(AgentEvent.workspace_id == workspace_id)
+                .order_by(AgentEvent.created_at)
+            )
+            if last_created is not None:
+                q = q.where(AgentEvent.created_at > last_created)
+            result = await db.execute(q)
+            for event in result.scalars().all():
+                yield {"data": json.dumps(_event_to_dict(event))}
+                last_created = event.created_at
+
+    return EventSourceResponse(generator())

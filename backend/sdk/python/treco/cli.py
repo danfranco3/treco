@@ -2,7 +2,7 @@
 treco CLI — track agent sessions from the terminal or Claude Code hooks.
 
 Usage:
-  treco init                        Interactive setup, writes ~/.treco
+  treco init                        Interactive setup, writes ~/.treco/config.json
   treco new [title]                 Create a new ticket (prompts if no title given)
   treco start [ticket-id]           Start tracking a ticket (picker if no id given)
   treco check <criterion-id>        Mark a criterion done (uses active session)
@@ -16,8 +16,13 @@ Usage:
   treco connect linear              Import open issues from Linear via API key
   treco import <url>                Import a single issue by URL (GitHub or Linear)
 
+  treco server start [--port N]     Start the backend server as a background daemon
+  treco server stop                 Stop the background server
+  treco server status               Show whether server is running
+
   treco hook post-tool-use          Called by Claude Code PostToolUse hook (reads stdin)
   treco hook stop                   Called by Claude Code Stop hook (reads stdin)
+  treco hook install                Install Claude Code hooks into ~/.claude/settings.json
 """
 
 import asyncio
@@ -25,13 +30,15 @@ import getpass
 import json
 import os
 import re
+import socket
 import sys
 from pathlib import Path
 
 import httpx
 
+CONFIG_DIR = Path.home() / ".treco"
+CONFIG_FILE = CONFIG_DIR / "config.json"
 SESSION_FILE = Path.home() / ".treco_session"
-CONFIG_FILE = Path.home() / ".treco"
 
 # ── config ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +52,7 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
     CONFIG_FILE.chmod(0o600)
 
@@ -77,7 +85,7 @@ def require_session() -> dict:
 def require_config() -> dict:
     cfg = load_config()
     api_key = cfg.get("api_key") or os.environ.get("TRECO_API_KEY")
-    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8000")
+    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8001")
     if not api_key:
         print("Not configured. Run: treco init", file=sys.stderr)
         sys.exit(1)
@@ -120,19 +128,93 @@ async def post_json(base_url: str, path: str, body: dict) -> dict:
         return r.json()
 
 
+# ── hooks ─────────────────────────────────────────────────────────────────────
+
+def _install_hooks() -> None:
+    settings_path = Path.home() / ".claude" / "settings.json"
+    hook_entry = {"type": "command", "command": "treco hook post-tool-use"}
+    stop_entry = {"type": "command", "command": "treco hook stop"}
+
+    if settings_path.exists():
+        try:
+            data = json.loads(settings_path.read_text())
+        except Exception:
+            data = {}
+    else:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+
+    hooks = data.setdefault("hooks", {})
+
+    post_tool_hooks = hooks.setdefault("PostToolUse", [])
+    post_tool_matcher = next((h for h in post_tool_hooks if h.get("matcher") == ""), None)
+    if post_tool_matcher is None:
+        post_tool_matcher = {"matcher": "", "hooks": []}
+        post_tool_hooks.append(post_tool_matcher)
+    inner = post_tool_matcher.setdefault("hooks", [])
+    if hook_entry not in inner:
+        inner.append(hook_entry)
+
+    stop_hooks = hooks.setdefault("Stop", [])
+    stop_matcher = next((h for h in stop_hooks if stop_entry in h.get("hooks", [])), None)
+    if stop_matcher is None:
+        stop_hooks.append({"hooks": [stop_entry]})
+
+    settings_path.write_text(json.dumps(data, indent=2))
+    print(f"Hooks installed in {settings_path}")
+
+
 # ── commands ──────────────────────────────────────────────────────────────────
 
 def cmd_init():
     print("Treco setup")
     print("-----------")
-    base_url = input("Treco URL [http://localhost:8000]: ").strip() or "http://localhost:8000"
-    api_key = input("Agent API key: ").strip()
-    if not api_key:
-        print("API key required.", file=sys.stderr)
-        sys.exit(1)
+    base_url = input("Treco URL [http://localhost:8001]: ").strip() or "http://localhost:8001"
     workspace_id = input("Workspace ID [demo]: ").strip() or "demo"
+
+    try:
+        httpx.get(f"{base_url}/api/tickets/?workspace_id={workspace_id}", timeout=2.0)
+    except Exception:
+        answer = input("Backend not reachable. Start it now? [Y/n]: ").strip().lower()
+        if answer not in ("n", "no"):
+            from treco.server import start as server_start
+            server_start()
+
+    try:
+        r = httpx.post(
+            f"{base_url}/api/init/",
+            json={"workspace_id": workspace_id, "agent_name": socket.gethostname()},
+            timeout=5.0,
+        )
+        r.raise_for_status()
+        data = r.json()
+        api_key = data["api_key"]
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 409:
+            print(
+                f"Agent '{socket.gethostname()}' already exists in workspace '{workspace_id}'.\n"
+                "To re-init, delete the existing agent or use a different workspace ID.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(f"Error creating agent: {exc.response.status_code} {exc.response.text}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:
+        print(f"Failed to connect to backend: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     save_config({"base_url": base_url, "api_key": api_key, "workspace_id": workspace_id})
     print(f"Saved to {CONFIG_FILE}")
+
+    _install_hooks()
+
+    print("\nSetup complete.")
+    print(f"  Agent created in workspace '{workspace_id}'")
+    print(f"  Backend: {base_url}")
+    print("  Claude Code hooks installed")
+    print("\nNext steps:")
+    print("  treco import <github-issue-url>")
+    print("  treco start")
 
 
 def cmd_new(title: str = ""):
@@ -177,6 +259,9 @@ def cmd_start(ticket_id: str = ""):
     if not ticket_id:
         ticket_id = _pick_ticket(cfg)
     _do_start(cfg, ticket_id)
+    answer = input("Inject ticket context into agent config? [Y/n]: ").strip().lower()
+    if answer not in ("n", "no"):
+        cmd_inject(ticket_id)
 
 
 def _do_start(cfg: dict, ticket_id: str) -> None:
@@ -306,6 +391,18 @@ def _replace_or_append(existing: str, header: str, section: str) -> str:
     return existing + sep + section
 
 
+def _env_hints_block(cfg: dict) -> str:
+    base_url = cfg.get("base_url", "http://localhost:8001")
+    workspace_id = cfg.get("workspace_id", "demo")
+    return (
+        "<!-- treco-env\n"
+        f"TRECO_URL={base_url}\n"
+        f"TRECO_WORKSPACE_ID={workspace_id}\n"
+        "(API key stored in ~/.treco/config.json — loaded automatically by `treco` CLI)\n"
+        "-->"
+    )
+
+
 def cmd_inject(ticket_id: str = "", criteria: list[dict] | None = None):
     cfg = require_config()
     if not ticket_id:
@@ -321,7 +418,7 @@ def cmd_inject(ticket_id: str = "", criteria: list[dict] | None = None):
         criteria = ticket.get("acceptance_criteria") or []
 
     agent = detect_agent(dict(os.environ))
-    section = _ticket_section(ticket, criteria)
+    section = _ticket_section(ticket, criteria) + "\n" + _env_hints_block(cfg) + "\n"
 
     targets = {
         "claude-code": Path.cwd() / "CLAUDE.md",
@@ -351,7 +448,7 @@ def cmd_inject(ticket_id: str = "", criteria: list[dict] | None = None):
 
 def cmd_connect_github():
     cfg = load_config()
-    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8000")
+    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8001")
     workspace_id = _workspace_id()
 
     token = cfg.get("github_token") or getpass.getpass("GitHub Personal Access Token: ").strip()
@@ -386,7 +483,7 @@ def cmd_connect_github():
 
 def cmd_connect_linear():
     cfg = load_config()
-    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8000")
+    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8001")
     workspace_id = _workspace_id()
 
     api_key = cfg.get("linear_api_key") or getpass.getpass("Linear API Key: ").strip()
@@ -428,7 +525,7 @@ def _parse_linear_url(url: str) -> str | None:
 
 def cmd_import_url(url: str):
     cfg = load_config()
-    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8000")
+    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8001")
     workspace_id = _workspace_id()
 
     github = _parse_github_url(url)
@@ -478,38 +575,87 @@ def cmd_import_url(url: str):
         _do_start(require_config(), ticket["id"])
 
 
+# ── server ────────────────────────────────────────────────────────────────────
+
+def cmd_server(args: list[str]) -> None:
+    from treco import server as srv
+
+    sub = args[0] if args else ""
+    if sub == "start":
+        port = 8001
+        if "--port" in args:
+            idx = args.index("--port")
+            try:
+                port = int(args[idx + 1])
+            except (IndexError, ValueError):
+                print("--port requires an integer value", file=sys.stderr)
+                sys.exit(1)
+        srv.start(port)
+    elif sub == "stop":
+        srv.stop()
+    elif sub == "status":
+        srv.status()
+    else:
+        print(f"Unknown server subcommand: {sub}\nUsage: treco server start|stop|status", file=sys.stderr)
+        sys.exit(1)
+
+
 # ── Claude Code hook handlers ─────────────────────────────────────────────────
 
-def cmd_hook_post_tool_use():
+def _safe_hook(fn):
     try:
-        payload = json.loads(sys.stdin.read())
+        fn()
     except Exception:
-        sys.exit(0)
-
-    s = load_session()
-    if not s.get("ticket_id"):
-        sys.exit(0)
-
-    usage = payload.get("usage") or {}
-    tokens_in = usage.get("input_tokens", 0)
-    tokens_out = usage.get("output_tokens", 0)
-
-    if tokens_in or tokens_out:
-        s["tokens_in"] = s.get("tokens_in", 0) + tokens_in
-        s["tokens_out"] = s.get("tokens_out", 0) + tokens_out
-        save_session(s)
-        cfg = require_config()
-        tool_name = payload.get("tool_name", "")
-        asyncio.run(post_event(
-            cfg, s["ticket_id"], "log",
-            tokens_in=tokens_in, tokens_out=tokens_out,
-            model=payload.get("model"),
-            payload={"message": f"tool: {tool_name}", "tool": tool_name},
-        ))
+        pass
     sys.exit(0)
 
 
-def cmd_hook_stop():
+def _run_post_tool_use():
+    try:
+        payload = json.loads(sys.stdin.read())
+    except Exception:
+        return
+
+    s = load_session()
+    if not s.get("ticket_id"):
+        return
+
+    usage = payload.get("usage") or {}
+    tokens_in = max(
+        usage.get("input_tokens", 0) - usage.get("cache_read_input_tokens", 0),
+        0,
+    )
+    tokens_out = usage.get("output_tokens", 0)
+    cache_write = usage.get("cache_creation_input_tokens", 0)
+
+    s["tokens_in"] = s.get("tokens_in", 0) + tokens_in
+    s["tokens_out"] = s.get("tokens_out", 0) + tokens_out
+    s["cache_write_tokens"] = s.get("cache_write_tokens", 0) + cache_write
+    save_session(s)
+
+    if tokens_in > 0 or tokens_out > 0:
+        cfg = load_config()
+        api_key = cfg.get("api_key") or os.environ.get("TRECO_API_KEY", "")
+        base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8001")
+        if not api_key:
+            return
+
+        tool_name = payload.get("tool_name", "")
+        asyncio.run(post_event(
+            {"api_key": api_key, "base_url": base_url},
+            s["ticket_id"], "log",
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            model=payload.get("model"),
+            payload={"tool": tool_name, "message": f"tool: {tool_name}"},
+        ))
+
+
+def cmd_hook_post_tool_use():
+    _safe_hook(_run_post_tool_use)
+
+
+def _run_stop():
     try:
         payload = json.loads(sys.stdin.read())
     except Exception:
@@ -517,26 +663,35 @@ def cmd_hook_stop():
 
     s = load_session()
     if not s.get("ticket_id"):
-        sys.exit(0)
+        return
 
     usage = payload.get("usage") or {}
-    s["tokens_in"] = s.get("tokens_in", 0) + usage.get("input_tokens", 0)
-    s["tokens_out"] = s.get("tokens_out", 0) + usage.get("output_tokens", 0)
+    final_in = s.get("tokens_in", 0) + max(
+        usage.get("input_tokens", 0) - usage.get("cache_read_input_tokens", 0),
+        0,
+    )
+    final_out = s.get("tokens_out", 0) + usage.get("output_tokens", 0)
 
     cfg = load_config()
     api_key = cfg.get("api_key") or os.environ.get("TRECO_API_KEY", "")
-    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8000")
-    if not api_key:
-        clear_session()
-        sys.exit(0)
+    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8001")
 
-    asyncio.run(post_event(
-        {"api_key": api_key, "base_url": base_url},
-        s["ticket_id"], "done",
-        tokens_in=s["tokens_in"], tokens_out=s["tokens_out"],
-    ))
+    if api_key:
+        asyncio.run(post_event(
+            {"api_key": api_key, "base_url": base_url},
+            s["ticket_id"], "done",
+            tokens_in=final_in,
+            tokens_out=final_out,
+        ))
     clear_session()
-    sys.exit(0)
+
+
+def cmd_hook_stop():
+    _safe_hook(_run_stop)
+
+
+def cmd_hook_install():
+    _install_hooks()
 
 
 # ── entry point ───────────────────────────────────────────────────────────────
@@ -573,8 +728,14 @@ def main():
         )()
     elif cmd == "import" and len(args) >= 2:
         cmd_import_url(args[1])
+    elif cmd == "server" and len(args) >= 2:
+        cmd_server(args[1:])
     elif cmd == "hook" and len(args) >= 2:
-        {"post-tool-use": cmd_hook_post_tool_use, "stop": cmd_hook_stop}.get(
+        {
+            "post-tool-use": cmd_hook_post_tool_use,
+            "stop": cmd_hook_stop,
+            "install": cmd_hook_install,
+        }.get(
             args[1], lambda: print(f"Unknown hook: {args[1]}", file=sys.stderr) or sys.exit(1)
         )()
     else:

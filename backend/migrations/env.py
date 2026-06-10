@@ -1,0 +1,58 @@
+import re
+from logging.config import fileConfig
+
+from sqlalchemy import create_engine, pool
+from sqlalchemy.engine import Connection
+
+from alembic import context
+
+alembic_config = context.config
+
+if alembic_config.config_file_name is not None:
+    fileConfig(alembic_config.config_file_name)
+
+from app.core.config import settings  # noqa: E402
+import app.models  # noqa: E402, F401
+from app.core.database import Base  # noqa: E402
+
+target_metadata = Base.metadata
+
+
+def _sync_url(url: str) -> str:
+    """Strip async driver prefixes so Alembic can use a sync connection."""
+    return re.sub(r"\+(aiosqlite|asyncpg)", "", url)
+
+
+alembic_config.set_main_option("sqlalchemy.url", _sync_url(settings.database_url))
+
+
+def run_migrations_offline() -> None:
+    url = alembic_config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def do_run_migrations(connection: Connection) -> None:
+    context.configure(connection=connection, target_metadata=target_metadata)
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    url = alembic_config.get_main_option("sqlalchemy.url")
+    connectable = create_engine(url, poolclass=pool.NullPool)
+    with connectable.connect() as connection:
+        do_run_migrations(connection)
+    connectable.dispose()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

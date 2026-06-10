@@ -9,3 +9,4 @@ dist/
 *.egg-info/
 .pytest_cache/
 .claude/worktrees/
+.gstack/

@@ -10,7 +10,7 @@ class TrecoClient:
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None):
         self._api_key = api_key or os.environ["TRECO_API_KEY"]
-        self._base_url = (base_url or os.environ.get("TRECO_URL", "http://localhost:8000")).rstrip("/")
+        self._base_url = (base_url or os.environ.get("TRECO_URL", "http://localhost:8001")).rstrip("/")
         self._http = httpx.AsyncClient(
             base_url=self._base_url,
             headers={"X-Agent-Key": self._api_key},

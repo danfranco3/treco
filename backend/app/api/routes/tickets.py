@@ -1,9 +1,10 @@
+import re
 import uuid
 from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +50,13 @@ class BulkImportRequest(BaseModel):
     team_key: str | None = None
     limit: int = 20
 
+    @field_validator("team_key")
+    @classmethod
+    def validate_team_key(cls, v: str | None) -> str | None:
+        if v is not None and not re.fullmatch(r"[A-Z0-9_-]{1,20}", v):
+            raise ValueError("team_key must be 1–20 uppercase alphanumeric characters")
+        return v
+
 
 class TicketResponse(BaseModel):
     id: str
@@ -60,8 +68,7 @@ class TicketResponse(BaseModel):
     acceptance_criteria: list[dict]
     body: dict
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 async def _upsert_ticket(
@@ -223,23 +230,38 @@ async def bulk_import(req: BulkImportRequest, db: AsyncSession = Depends(get_db)
         normalized_list = [adapter.normalize(raw) for raw in raw_issues]
 
     else:
-        team_filter = f'(filter: {{ team: {{ key: {{ eq: "{req.team_key}" }} }} }})' if req.team_key else ""
-        query = f"""
-            query {{
-                issues{team_filter} {{
-                    nodes {{
-                        identifier
-                        title
-                        description
-                        state {{ name }}
-                    }}
-                }}
-            }}
-        """
+        if req.team_key:
+            query = """
+                query($teamKey: String!) {
+                    issues(filter: { team: { key: { eq: $teamKey } } }) {
+                        nodes {
+                            identifier
+                            title
+                            description
+                            state { name }
+                        }
+                    }
+                }
+            """
+            variables: dict[str, Any] = {"teamKey": req.team_key}
+        else:
+            query = """
+                query {
+                    issues(first: 50) {
+                        nodes {
+                            identifier
+                            title
+                            description
+                            state { name }
+                        }
+                    }
+                }
+            """
+            variables = {}
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 "https://api.linear.app/graphql",
-                json={"query": query},
+                json={"query": query, "variables": variables},
                 headers={"Authorization": req.token, "Content-Type": "application/json"},
             )
             r.raise_for_status()
@@ -299,8 +321,17 @@ async def get_ticket(ticket_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/")
-async def list_tickets(workspace_id: str, db: AsyncSession = Depends(get_db)):
+async def list_tickets(
+    workspace_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(
-        select(Ticket).where(Ticket.workspace_id == workspace_id)
+        select(Ticket)
+        .where(Ticket.workspace_id == workspace_id)
+        .order_by(Ticket.created_at.desc())
+        .limit(min(limit, 200))
+        .offset(offset)
     )
     return result.scalars().all()

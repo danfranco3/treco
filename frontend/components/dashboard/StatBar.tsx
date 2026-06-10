@@ -1,5 +1,4 @@
 import type { Agent, AgentEvent, Ticket } from "@/lib/types";
-import { Card } from "@/components/ui/Card";
 
 interface StatBarProps {
   agents: Agent[];
@@ -9,7 +8,8 @@ interface StatBarProps {
 
 export function StatBar({ agents, tickets, events }: StatBarProps) {
   const activeAgents = agents.filter((a) => a.status === "working").length;
-  const openTickets = tickets.filter((t) => t.status === "open" || t.status === "in_progress").length;
+  const openTickets  = tickets.filter((t) => t.status === "open" || t.status === "in_progress").length;
+  const doneTickets  = tickets.filter((t) => t.status === "done").length;
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -18,21 +18,20 @@ export function StatBar({ agents, tickets, events }: StatBarProps) {
   ).length;
 
   const stats = [
-    { label: "Active Agents",       value: activeAgents,  color: "text-cyan-brand",   icon: "◎" },
-    { label: "Open Tickets",         value: openTickets,   color: "text-amber-brand",  icon: "◈" },
-    { label: "Criteria Done Today",  value: criteriaToday, color: "text-green-brand",  icon: "✓" },
+    { icon: "◎", value: activeAgents, label: "active" },
+    { icon: "◈", value: openTickets,  label: "open" },
+    { icon: "✓", value: doneTickets,  label: "done" },
+    { icon: "⬡", value: criteriaToday, label: "criteria today" },
   ];
 
   return (
-    <div className="grid grid-cols-3 gap-4">
-      {stats.map((s) => (
-        <Card key={s.label} className="flex items-center gap-4">
-          <span className={`text-3xl ${s.color}`}>{s.icon}</span>
-          <div>
-            <p className={`text-3xl font-bold font-mono ${s.color}`}>{s.value}</p>
-            <p className="text-text-muted text-xs mt-0.5">{s.label}</p>
-          </div>
-        </Card>
+    <div className="flex flex-wrap gap-x-6 gap-y-2 items-center px-4 py-2 bg-[var(--surface)] rounded-lg border border-[var(--border)]">
+      {stats.map((s, i) => (
+        <span key={s.label} className="flex items-center gap-2">
+          {i > 0 && <span className="text-[var(--border)] select-none hidden sm:inline">·</span>}
+          <span className="font-mono text-sm text-[var(--cyan)]">{s.icon} {s.value}</span>
+          <span className="text-xs text-[var(--text-2)]">{s.label}</span>
+        </span>
       ))}
     </div>
   );

@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { WorkspaceProvider } from "@/lib/workspace";
+import { StreamProvider } from "@/lib/StreamProvider";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopBar } from "@/components/layout/TopBar";
+import { CommandPaletteProvider } from "@/components/ui/CommandPaletteProvider";
 
 export const metadata: Metadata = {
   title: "Treco",
@@ -14,11 +16,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body className="flex h-screen overflow-hidden bg-bg text-text-primary">
         <WorkspaceProvider>
-          <Sidebar />
-          <div className="flex flex-col flex-1 min-w-0">
-            <TopBar />
-            <main className="flex-1 overflow-y-auto p-6">{children}</main>
-          </div>
+          <StreamProvider>
+            <CommandPaletteProvider />
+            <Sidebar />
+            <div className="flex flex-col flex-1 min-w-0">
+              <TopBar />
+              <main className="flex-1 overflow-y-auto p-6">{children}</main>
+            </div>
+          </StreamProvider>
         </WorkspaceProvider>
       </body>
     </html>

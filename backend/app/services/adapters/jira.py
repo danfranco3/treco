@@ -37,4 +37,4 @@ def _extract_adf_text(node: dict[str, Any]) -> str:
     if node.get("type") == "text":
         return node.get("text", "")
     children = node.get("content", [])
-    return " ".join(_extract_adf_text(child) for child in children).strip()
+    return "".join(_extract_adf_text(child) for child in children).strip()

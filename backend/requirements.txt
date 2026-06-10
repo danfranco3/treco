@@ -1,4 +1,5 @@
 fastapi>=0.111.0
+sse-starlette>=1.8.2
 uvicorn[standard]>=0.30.0
 sqlalchemy[asyncio]>=2.0.0
 aiosqlite>=0.20.0

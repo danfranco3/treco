@@ -145,19 +145,31 @@ class Seeder:
         }
         if spec["source"] != "custom":
             body["source"] = spec["source"]
-            raw = {
-                "key": spec["source_id"],
-                "fields": {
-                    "summary": spec["title"],
+            source = spec["source"]
+            sid = spec["source_id"] or ""
+            if source == "jira":
+                raw = {
+                    "key": sid,
+                    "fields": {
+                        "summary": spec["title"],
+                        "description": spec["description"],
+                        "status": {"name": "In Progress"},
+                    },
+                }
+            elif source == "linear":
+                raw = {
+                    "identifier": sid,
+                    "title": spec["title"],
                     "description": spec["description"],
-                    "status": {"name": "In Progress"},
-                },
-                "number": int(spec["source_id"]) if spec["source_id"] and spec["source_id"].isdigit() else 0,
-                "state": "open",
-                "body": spec["description"],
-                "identifier": spec["source_id"],
-                "title": spec["title"],
-            }
+                    "state": {"name": "In Progress"},
+                }
+            else:  # github
+                raw = {
+                    "number": int(sid) if sid.isdigit() else 0,
+                    "title": spec["title"],
+                    "state": "open",
+                    "body": spec["description"],
+                }
             r = await self.client.post("/api/tickets/import", json={
                 "source": spec["source"],
                 "workspace_id": self.workspace_id,

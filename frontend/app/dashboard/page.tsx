@@ -1,42 +1,28 @@
 "use client";
 
-import { useMemo } from "react";
 import { useWorkspace } from "@/lib/workspace";
-import { useAgents, useTicketEvents, useTickets } from "@/lib/hooks";
+import { useAgents, useTickets, useWorkspaceEvents } from "@/lib/hooks";
 import { StatBar } from "@/components/dashboard/StatBar";
 import { AgentStatusGrid } from "@/components/dashboard/AgentStatusGrid";
 import { EventFeed } from "@/components/dashboard/EventFeed";
 import { DashboardBurndown } from "@/components/dashboard/DashboardBurndown";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
-
-function useActiveEvents(activeTicketIds: string[]) {
-  // SWR rules require hooks at top level — we fetch the first 6 active tickets' events
-  const e0 = useTicketEvents(activeTicketIds[0] ?? "");
-  const e1 = useTicketEvents(activeTicketIds[1] ?? "");
-  const e2 = useTicketEvents(activeTicketIds[2] ?? "");
-  const e3 = useTicketEvents(activeTicketIds[3] ?? "");
-  const e4 = useTicketEvents(activeTicketIds[4] ?? "");
-  const e5 = useTicketEvents(activeTicketIds[5] ?? "");
-
-  return [e0, e1, e2, e3, e4, e5]
-    .flatMap((r) => r.data ?? [])
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-}
+import { OnboardingCard } from "@/components/dashboard/OnboardingCard";
 
 export default function DashboardPage() {
   const { workspaceId } = useWorkspace();
   const { data: agents = [], isLoading: agentsLoading } = useAgents(workspaceId);
   const { data: tickets = [], isLoading: ticketsLoading } = useTickets(workspaceId);
+  const { data: rawEvents = [] } = useWorkspaceEvents(workspaceId);
 
-  const activeTicketIds = useMemo(
-    () => agents.filter((a) => a.current_ticket_id).map((a) => a.current_ticket_id!).slice(0, 6),
-    [agents]
+  // Chronological order for charts/feed; workspace events arrive newest-first from API
+  const events = [...rawEvents].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
 
-  const events = useActiveEvents(activeTicketIds);
-
   const loading = agentsLoading || ticketsLoading;
+  const isEmpty = !loading && agents.length === 0 && tickets.length === 0;
 
   return (
     <div className="flex flex-col gap-6 h-full">
@@ -44,6 +30,8 @@ export default function DashboardPage() {
         <h1 className="text-xl font-bold text-text-primary">Dashboard</h1>
         {loading && <Spinner />}
       </div>
+
+      {isEmpty && <OnboardingCard workspaceId={workspaceId} />}
 
       <StatBar agents={agents} tickets={tickets} events={events} />
 

@@ -60,8 +60,8 @@ export const importTicket = (
   data: CreateTicketRequest & { source_id?: string; source?: string }
 ): Promise<Ticket> => post("/tickets/import", data);
 
-export const fetchTickets = (workspaceId: string): Promise<Ticket[]> =>
-  get(`/tickets/?workspace_id=${workspaceId}`);
+export const fetchTickets = (workspaceId: string, limit = 50, offset = 0): Promise<Ticket[]> =>
+  get(`/tickets/?workspace_id=${workspaceId}&limit=${limit}&offset=${offset}`);
 
 export const fetchTicket = (ticketId: string): Promise<Ticket> =>
   get(`/tickets/${ticketId}`);
@@ -74,3 +74,18 @@ export const fetchTicketEvents = (ticketId: string): Promise<AgentEvent[]> =>
 
 export const fetchTicketCost = (ticketId: string): Promise<CostSummary> =>
   get(`/events/ticket/${ticketId}/cost`);
+
+export const fetchWorkspaceEvents = (workspaceId: string, limit = 100): Promise<AgentEvent[]> =>
+  get(`/events/?workspace_id=${workspaceId}&limit=${limit}`);
+
+export const fetchAgentEvents = (agentId: string, limit = 200): Promise<AgentEvent[]> =>
+  get(`/events/agent/${agentId}?limit=${limit}`);
+
+export const createAgent = (data: { workspace_id: string; name: string }) =>
+  post<{ id: string; name: string; status: string; current_ticket_id: string | null; workspace_id: string; api_key: string }>(
+    "/agents/",
+    data
+  );
+
+export const assignTicket = (agentId: string, ticketId: string): Promise<{ ok: boolean }> =>
+  post(`/agents/${agentId}/assign`, { ticket_id: ticketId });

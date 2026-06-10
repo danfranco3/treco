@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { CriteriaChecklist } from "@/components/ticket-detail/CriteriaChecklist";
 import { TicketEventLog } from "@/components/ticket-detail/TicketEventLog";
 import { CostPanel } from "@/components/ticket-detail/CostPanel";
+import { AssignAgentPanel } from "@/components/ticket-detail/AssignAgentPanel";
 import { criteriaProgress } from "@/lib/utils";
 
 export default function TicketDetailPage() {
@@ -22,6 +23,7 @@ export default function TicketDetailPage() {
   const { data: agents = [] } = useAgents(workspaceId);
 
   const agentNames = Object.fromEntries(agents.map((a) => [a.id, a.name]));
+  const idleAgents = agents.filter((a) => a.status === "idle");
 
   if (ticketLoading) {
     return (
@@ -88,8 +90,11 @@ export default function TicketDetailPage() {
           </div>
         </div>
 
-        {/* Cost panel — 1 col */}
-        <div>
+        {/* Right col: assign panel + cost */}
+        <div className="flex flex-col gap-4">
+          {!activeAgent && (
+            <AssignAgentPanel ticketId={ticket.id} idleAgents={idleAgents} />
+          )}
           {cost ? (
             <CostPanel cost={cost} events={events} />
           ) : (
