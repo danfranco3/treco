@@ -18,10 +18,21 @@ from app.services.criteria_extractor import create_criterion, extract_criteria
 router = APIRouter()
 
 
+def _require_workspace_id(v: str) -> str:
+    if not v or not v.strip():
+        raise ValueError("workspace_id is required")
+    return v
+
+
 class ImportTicketRequest(BaseModel):
     source: Literal["jira", "linear", "asana", "github"]
     workspace_id: str
     raw: dict[str, Any]
+
+    @field_validator("workspace_id")
+    @classmethod
+    def validate_workspace_id(cls, v: str) -> str:
+        return _require_workspace_id(v)
 
 
 class CreateTicketRequest(BaseModel):
@@ -51,6 +62,11 @@ class BulkImportRequest(BaseModel):
     repo: str | None = None
     team_key: str | None = None
     limit: int = 20
+
+    @field_validator("workspace_id")
+    @classmethod
+    def validate_workspace_id(cls, v: str) -> str:
+        return _require_workspace_id(v)
 
     @field_validator("team_key")
     @classmethod
@@ -161,7 +177,36 @@ async def bulk_import(req: BulkImportRequest, db: AsyncSession = Depends(get_db)
     return await _bulk_import_linear(req, db)
 
 
-@router.post("/", response_model=TicketResponse)
+class FetchUrlRequest(BaseModel):
+    workspace_id: str
+    url: str
+
+    @field_validator("workspace_id")
+    @classmethod
+    def validate_workspace_id(cls, v: str) -> str:
+        return _require_workspace_id(v)
+
+
+_GITHUB_ISSUE_RE = re.compile(
+    r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/(\d+)"
+)
+
+
+@router.post("/fetch/url", response_model=TicketResponse)
+async def fetch_url(req: FetchUrlRequest, db: AsyncSession = Depends(get_db)):
+    m = _GITHUB_ISSUE_RE.match(req.url.strip())
+    if m:
+        owner, repo, issue_number = m.groups()
+        adapter = ADAPTERS["github"]
+        normalized = await adapter.fetch_issue(f"{owner}/{repo}", int(issue_number))
+        return await _upsert_ticket(db, req.workspace_id, normalized)
+    raise HTTPException(
+        status_code=400,
+        detail="Unsupported URL. Only public GitHub issue URLs are supported (https://github.com/owner/repo/issues/N).",
+    )
+
+
+@router.post("", response_model=TicketResponse)
 async def create_ticket(req: CreateTicketRequest, db: AsyncSession = Depends(get_db)):
     criteria = [create_criterion(c) for c in req.acceptance_criteria]
     if not criteria and req.description:
@@ -253,7 +298,7 @@ async def assign_ticket_workspace(
     return ticket
 
 
-@router.get("/", response_model=list[TicketResponse])
+@router.get("", response_model=list[TicketResponse])
 async def list_tickets(
     workspace_id: str | None = None,
     limit: int = 50,

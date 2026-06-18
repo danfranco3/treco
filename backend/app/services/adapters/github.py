@@ -20,14 +20,14 @@ class GitHubIssueAdapter(TicketAdapter):
     def extract_status(self, raw: dict[str, Any]) -> str:
         return "done" if raw.get("state") == "closed" else "open"
 
-    async def fetch_issue(self, repo: str, issue_number: int, token: str) -> NormalizedTicket:
+    async def fetch_issue(self, repo: str, issue_number: int, token: str = "") -> NormalizedTicket:
+        headers: dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
         async with httpx.AsyncClient() as client:
             r = await client.get(
                 f"https://api.github.com/repos/{repo}/issues/{issue_number}",
-                headers={
-                    "Authorization": f"token {token}",
-                    "Accept": "application/vnd.github.v3+json",
-                },
+                headers=headers,
             )
             if r.status_code == 404:
                 raise HTTPException(status_code=404, detail="Issue not found")
@@ -35,14 +35,14 @@ class GitHubIssueAdapter(TicketAdapter):
         return self.normalize(r.json())
 
     async def fetch_issues(self, repo: str, token: str, limit: int = 20) -> list[NormalizedTicket]:
+        headers: dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
         async with httpx.AsyncClient() as client:
             r = await client.get(
                 f"https://api.github.com/repos/{repo}/issues",
                 params={"state": "open", "per_page": limit},
-                headers={
-                    "Authorization": f"token {token}",
-                    "Accept": "application/vnd.github.v3+json",
-                },
+                headers=headers,
             )
             r.raise_for_status()
         return [self.normalize(raw) for raw in r.json()]
