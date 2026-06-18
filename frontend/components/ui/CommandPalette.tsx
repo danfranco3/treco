@@ -23,7 +23,7 @@ function highlight(text: string, query: string): React.ReactNode {
   return (
     <>
       {text.slice(0, idx)}
-      <mark className="bg-[var(--cyan)]/20 text-[var(--cyan)] rounded-sm not-italic">
+      <mark className="bg-[var(--green)]/20 text-[var(--green)] rounded-sm not-italic">
         {text.slice(idx, idx + query.length)}
       </mark>
       {text.slice(idx + query.length)}

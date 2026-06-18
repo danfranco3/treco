@@ -33,7 +33,7 @@ export function AgentMiniCard({ agent, ticket, deviation }: AgentMiniCardProps) 
     <div
       className={cn(
         "bg-surface border rounded-xl p-4 transition-all duration-300",
-        isWorking && !hasDeviation && "agent-working border-cyan-brand/20",
+        isWorking && !hasDeviation && "agent-working border-green-brand/20",
         isError && !hasDeviation && "border-red-brand/30",
         (hasDeviation || isAwaitingApproval) && "border-amber-500/40 bg-amber-500/5",
         !isWorking && !isError && !hasDeviation && !isAwaitingApproval && "border-border-default"
@@ -57,12 +57,12 @@ export function AgentMiniCard({ agent, ticket, deviation }: AgentMiniCardProps) 
 
       {ticket && isWorking && (
         <Link href={`/tickets/${ticket.id}`} className="mt-3 block group">
-          <p className="text-xs text-text-muted group-hover:text-cyan-brand transition-colors truncate">
+          <p className="text-xs text-text-muted group-hover:text-green-brand transition-colors truncate">
             {ticket.title}
           </p>
           <div className="mt-1.5 h-1 bg-surface-2 rounded-full overflow-hidden">
             <div
-              className="h-full bg-cyan-brand/60 rounded-full transition-all duration-500"
+              className="h-full bg-green-brand/60 rounded-full transition-all duration-500"
               style={{ width: `${criteriaProgress(ticket.acceptance_criteria)}%` }}
             />
           </div>

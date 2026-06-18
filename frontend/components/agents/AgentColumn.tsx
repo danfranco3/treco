@@ -3,8 +3,8 @@ import { AgentCard } from "./AgentCard";
 import { cn } from "@/lib/utils";
 
 const COLUMN_STYLES: Record<string, { header: string; dot: string }> = {
-  Working: { header: "text-cyan-brand", dot: "bg-cyan-brand" },
-  Idle:    { header: "text-text-muted",  dot: "bg-gray-600" },
+  Working: { header: "text-green-brand", dot: "bg-green-brand" },
+  Idle:    { header: "text-text-muted",  dot: "bg-stone-300" },
   Error:   { header: "text-red-brand",   dot: "bg-red-brand" },
 };
 

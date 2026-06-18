@@ -74,7 +74,7 @@ export function FolderBrowser({ onSelect }: FolderBrowserProps) {
             >
               <span>{entry.is_git_repo ? "◈" : "▸"}</span>
               {entry.name}
-              {entry.is_git_repo && <span className="text-cyan-brand text-[10px]">git</span>}
+              {entry.is_git_repo && <span className="text-green-brand text-[10px]">git</span>}
             </button>
           ))
         )}
@@ -84,7 +84,7 @@ export function FolderBrowser({ onSelect }: FolderBrowserProps) {
         type="button"
         onClick={() => currentPath && onSelect(currentPath)}
         disabled={!currentPath}
-        className="text-xs bg-cyan-brand/10 border border-cyan-brand/40 text-cyan-brand hover:bg-cyan-brand/20 px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors"
+        className="text-xs bg-green-brand/10 border border-green-brand/40 text-green-brand hover:bg-green-brand/20 px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors"
       >
         Use this folder
       </button>

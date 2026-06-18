@@ -45,7 +45,7 @@ export default function TicketsPage() {
           </Link>
           <Link
             href="/tickets/new"
-            className="px-3 py-1.5 rounded-lg text-sm bg-green-brand text-bg font-semibold hover:bg-green-brand/90 transition-colors"
+            className="px-3 py-1.5 rounded-lg text-sm bg-green-brand text-white font-semibold hover:bg-green-brand/90 transition-colors"
           >
             New Ticket
           </Link>

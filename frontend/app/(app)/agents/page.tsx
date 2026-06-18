@@ -27,7 +27,7 @@ export default function AgentsPage() {
           {isLoading && <Spinner />}
           <button
             onClick={() => setShowRegister(true)}
-            className="text-xs bg-cyan-brand/10 border border-cyan-brand/40 text-cyan-brand hover:bg-cyan-brand/20 px-3 py-1.5 rounded-lg transition-colors"
+            className="text-xs bg-green-brand/10 border border-green-brand/40 text-green-brand hover:bg-green-brand/20 px-3 py-1.5 rounded-lg transition-colors"
           >
             + Register agent
           </button>
@@ -37,7 +37,7 @@ export default function AgentsPage() {
       {noneWorking && (
         <div className="border border-dashed border-border-default rounded-xl px-4 py-3 text-xs text-text-muted">
           No agents running. In a terminal:{" "}
-          <code className="font-mono text-cyan-brand">treco start</code>
+          <code className="font-mono text-green-brand">treco start</code>
           {" — or assign a ticket to an idle agent from the "}
           <a href="/tickets" className="underline hover:text-text-primary">Tickets</a>
           {" page."}

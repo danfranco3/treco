@@ -64,7 +64,7 @@ export function RegisterAgentModal({ workspaceId, onClose, onCreated }: Register
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleRegister()}
               placeholder="e.g. claude-dev-1"
-              className="w-full bg-surface-2 border border-border-default rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-cyan-brand/60 mb-4"
+              className="w-full bg-surface-2 border border-border-default rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-green-brand/60 mb-4"
             />
 
             {error && <p className="text-xs text-red-brand mb-3">{error}</p>}
@@ -79,7 +79,7 @@ export function RegisterAgentModal({ workspaceId, onClose, onCreated }: Register
               <button
                 onClick={handleRegister}
                 disabled={loading || !name.trim()}
-                className="text-xs bg-cyan-brand/10 border border-cyan-brand/40 text-cyan-brand hover:bg-cyan-brand/20 px-4 py-2 rounded-lg disabled:opacity-40 transition-colors"
+                className="text-xs bg-green-brand/10 border border-green-brand/40 text-green-brand hover:bg-green-brand/20 px-4 py-2 rounded-lg disabled:opacity-40 transition-colors"
               >
                 {loading ? "Creating…" : "Register"}
               </button>
@@ -94,12 +94,12 @@ export function RegisterAgentModal({ workspaceId, onClose, onCreated }: Register
 
             <label className="block text-xs text-text-muted mb-1">API Key</label>
             <div className="flex gap-2 mb-4">
-              <code className="flex-1 text-xs font-mono bg-surface-2 border border-border-default text-cyan-brand px-3 py-2 rounded-lg truncate select-all">
+              <code className="flex-1 text-xs font-mono bg-surface-2 border border-border-default text-green-brand px-3 py-2 rounded-lg truncate select-all">
                 {apiKey}
               </code>
               <button
                 onClick={() => copy(apiKey, "key")}
-                className="text-xs border border-border-default hover:border-cyan-brand/40 text-text-muted hover:text-text-primary px-3 py-2 rounded-lg transition-colors"
+                className="text-xs border border-border-default hover:border-green-brand/40 text-text-muted hover:text-text-primary px-3 py-2 rounded-lg transition-colors"
               >
                 {copied === "key" ? "Copied!" : "Copy"}
               </button>
@@ -112,7 +112,7 @@ export function RegisterAgentModal({ workspaceId, onClose, onCreated }: Register
               </code>
               <button
                 onClick={() => copy(launchCmd, "cmd")}
-                className="text-xs border border-border-default hover:border-cyan-brand/40 text-text-muted hover:text-text-primary px-3 py-2 rounded-lg transition-colors"
+                className="text-xs border border-border-default hover:border-green-brand/40 text-text-muted hover:text-text-primary px-3 py-2 rounded-lg transition-colors"
               >
                 {copied === "cmd" ? "Copied!" : "Copy"}
               </button>
@@ -121,7 +121,7 @@ export function RegisterAgentModal({ workspaceId, onClose, onCreated }: Register
             <div className="flex justify-end">
               <button
                 onClick={onClose}
-                className="text-xs bg-cyan-brand/10 border border-cyan-brand/40 text-cyan-brand hover:bg-cyan-brand/20 px-4 py-2 rounded-lg transition-colors"
+                className="text-xs bg-green-brand/10 border border-green-brand/40 text-green-brand hover:bg-green-brand/20 px-4 py-2 rounded-lg transition-colors"
               >
                 Done
               </button>

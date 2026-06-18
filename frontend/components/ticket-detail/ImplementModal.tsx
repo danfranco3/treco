@@ -67,7 +67,7 @@ export function ImplementModal({ ticket, workspace, workspaceId, onClose }: Impl
             onChange={(e) => setPrompt(e.target.value)}
             rows={10}
             disabled={!!blocked}
-            className="bg-surface-2 border border-border-default rounded-lg px-2 py-1.5 text-sm text-text-primary font-mono outline-none focus:border-cyan-brand/60 resize-y disabled:opacity-40"
+            className="bg-surface-2 border border-border-default rounded-lg px-2 py-1.5 text-sm text-text-primary font-mono outline-none focus:border-green-brand/60 resize-y disabled:opacity-40"
           />
         </div>
 
@@ -83,7 +83,7 @@ export function ImplementModal({ ticket, workspace, workspaceId, onClose }: Impl
           <button
             onClick={handleSubmit}
             disabled={loading || !!blocked}
-            className="text-xs bg-cyan-brand/10 border border-cyan-brand/40 text-cyan-brand hover:bg-cyan-brand/20 px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors"
+            className="text-xs bg-green-brand/10 border border-green-brand/40 text-green-brand hover:bg-green-brand/20 px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors"
           >
             {loading ? "Starting…" : "Implement"}
           </button>

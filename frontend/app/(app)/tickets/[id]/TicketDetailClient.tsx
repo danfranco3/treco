@@ -53,10 +53,10 @@ export function TicketDetailClient() {
             )}
             <Badge label={ticket.status} />
             {activeAgent && (
-              <span className="flex items-center gap-1.5 text-xs text-cyan-brand bg-cyan-brand/10 border border-cyan-brand/30 px-2 py-0.5 rounded-full">
+              <span className="flex items-center gap-1.5 text-xs text-green-brand bg-green-brand/10 border border-green-brand/30 px-2 py-0.5 rounded-full">
                 <span className="relative flex h-1.5 w-1.5">
-                  <span className="ping-slow absolute inline-flex h-full w-full rounded-full bg-cyan-brand opacity-75" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-cyan-brand" />
+                  <span className="ping-slow absolute inline-flex h-full w-full rounded-full bg-green-brand opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-brand" />
                 </span>
                 {activeAgent.name} working
               </span>

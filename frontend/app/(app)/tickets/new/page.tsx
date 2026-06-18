@@ -108,7 +108,7 @@ export default function NewTicketPage() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What needs to be built?"
-              className="bg-surface border border-border-default rounded-lg px-4 py-3 text-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-cyan-brand transition-colors"
+              className="bg-surface border border-border-default rounded-lg px-4 py-3 text-lg text-text-primary placeholder-text-muted focus:outline-none focus:border-green-brand transition-colors"
             />
             {errors.title && (
               <p className="text-red-brand text-xs">{errors.title}</p>
@@ -126,7 +126,7 @@ export default function NewTicketPage() {
               onChange={(e) => setDescription(e.target.value)}
               placeholder={"Describe the ticket in detail.\n\nYou can include checklists:\n- [ ] First step\n- [ ] Second step"}
               rows={7}
-              className="bg-surface border border-border-default rounded-lg px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-cyan-brand transition-colors resize-y font-mono"
+              className="bg-surface border border-border-default rounded-lg px-4 py-3 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-green-brand transition-colors resize-y font-mono"
             />
           </div>
 
@@ -142,7 +142,7 @@ export default function NewTicketPage() {
                   onClick={() => setCriteriaMode("manual")}
                   className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                     criteriaMode === "manual"
-                      ? "bg-cyan-brand text-bg"
+                      ? "bg-green-brand text-white"
                       : "text-text-muted hover:text-text-primary"
                   }`}
                 >
@@ -153,7 +153,7 @@ export default function NewTicketPage() {
                   onClick={() => setCriteriaMode("auto")}
                   className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                     criteriaMode === "auto"
-                      ? "bg-cyan-brand text-bg"
+                      ? "bg-green-brand text-white"
                       : "text-text-muted hover:text-text-primary"
                   }`}
                 >
@@ -163,8 +163,8 @@ export default function NewTicketPage() {
             </div>
 
             {criteriaMode === "auto" ? (
-              <div className="flex items-center gap-2 px-4 py-3 bg-surface border border-cyan-brand/20 rounded-lg">
-                <span className="text-cyan-brand text-sm">◈</span>
+              <div className="flex items-center gap-2 px-4 py-3 bg-surface border border-green-brand/20 rounded-lg">
+                <span className="text-green-brand text-sm">◈</span>
                 <p className="text-sm text-text-muted">
                   Will extract criteria from description using AI
                 </p>
@@ -178,12 +178,12 @@ export default function NewTicketPage() {
                     onChange={(e) => setCriteriaInput(e.target.value)}
                     onKeyDown={handleCriteriaKeyDown}
                     placeholder="Add a criterion and press Enter"
-                    className="flex-1 bg-surface border border-border-default rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-cyan-brand transition-colors"
+                    className="flex-1 bg-surface border border-border-default rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-green-brand transition-colors"
                   />
                   <button
                     type="button"
                     onClick={addCriterion}
-                    className="px-4 py-2 bg-surface-2 border border-border-default rounded-lg text-sm text-text-primary hover:border-cyan-brand transition-colors"
+                    className="px-4 py-2 bg-surface-2 border border-border-default rounded-lg text-sm text-text-primary hover:border-green-brand transition-colors"
                   >
                     Add
                   </button>
@@ -225,8 +225,8 @@ export default function NewTicketPage() {
                   onClick={() => setSource(s.value)}
                   className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
                     source === s.value
-                      ? "bg-cyan-brand/10 border-cyan-brand text-cyan-brand"
-                      : "bg-surface border-border-default text-text-muted hover:text-text-primary hover:border-gray-500"
+                      ? "bg-green-brand/10 border-green-brand text-green-brand"
+                      : "bg-surface border-border-default text-text-muted hover:text-text-primary hover:border-stone-400"
                   }`}
                 >
                   {s.label}
@@ -238,7 +238,7 @@ export default function NewTicketPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="mt-2 px-6 py-3 bg-cyan-brand text-bg font-semibold rounded-lg hover:bg-cyan-brand/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="mt-2 px-6 py-3 bg-green-brand text-white font-semibold rounded-lg hover:bg-green-brand/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? "Creating…" : "Create Ticket"}
           </button>
@@ -265,7 +265,7 @@ export default function NewTicketPage() {
               <p className="text-xs font-medium text-text-muted uppercase tracking-wider">
                 Acceptance Criteria
               </p>
-              <p className="text-sm text-cyan-brand/70 italic">
+              <p className="text-sm text-green-brand/70 italic">
                 AI will extract criteria from your description
               </p>
             </div>

@@ -6,7 +6,7 @@ import { getPayload } from "@/lib/types";
 import { formatTime } from "@/lib/utils";
 
 const TAG: Record<string, { label: string; color: string }> = {
-  ticket_started:    { label: "START",    color: "text-cyan-brand" },
+  ticket_started:    { label: "START",    color: "text-green-brand" },
   criterion_checked: { label: "✓ CRIT",  color: "text-green-brand" },
   criterion_failed:  { label: "✗ CRIT",  color: "text-red-brand" },
   pr_opened:         { label: "PR",       color: "text-amber-brand" },
@@ -69,7 +69,7 @@ export function TerminalLog({ events, agentNames = {}, maxLines = 200 }: Termina
             )}
             {msg && <span className={`ml-1 ${isDeviation ? "text-amber-400" : "text-text-primary"}`}>{msg}</span>}
             {url && (
-              <a href={url} target="_blank" rel="noopener noreferrer" className="ml-1 text-cyan-brand underline underline-offset-2">
+              <a href={url} target="_blank" rel="noopener noreferrer" className="ml-1 text-green-brand underline underline-offset-2">
                 {url}
               </a>
             )}

@@ -34,7 +34,7 @@ export function OnboardingCard({ workspaceId }: OnboardingCardProps) {
   ];
 
   return (
-    <div className="border border-cyan-brand/30 bg-cyan-brand/5 rounded-xl p-6 relative">
+    <div className="border border-green-brand/30 bg-green-brand/5 rounded-xl p-6 relative">
       <button
         onClick={dismiss}
         className="absolute top-4 right-4 text-text-muted hover:text-text-primary text-xs"
@@ -53,7 +53,7 @@ export function OnboardingCard({ workspaceId }: OnboardingCardProps) {
           <li key={i} className="flex items-center gap-3">
             <span className="text-xs text-text-muted w-4 flex-shrink-0">{i + 1}.</span>
             <span className="text-xs text-text-muted w-36 flex-shrink-0">{step.label}</span>
-            <code className="text-xs font-mono bg-surface-2 border border-border-default text-cyan-brand px-2 py-1 rounded select-all">
+            <code className="text-xs font-mono bg-surface-2 border border-border-default text-green-brand px-2 py-1 rounded select-all">
               {step.cmd}
             </code>
           </li>
@@ -62,7 +62,7 @@ export function OnboardingCard({ workspaceId }: OnboardingCardProps) {
 
       <p className="text-xs text-text-muted mt-4">
         Claude Code users: run{" "}
-        <code className="font-mono text-cyan-brand">treco hook install</code> to auto-track
+        <code className="font-mono text-green-brand">treco hook install</code> to auto-track
         token usage from every tool call.
       </p>
 

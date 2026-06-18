@@ -96,7 +96,7 @@ export function AgentDetailClient() {
                 <Link
                   key={tid}
                   href={`/tickets/${tid}`}
-                  className="bg-surface border border-border-default rounded-lg px-4 py-2.5 flex items-center gap-3 hover:border-cyan-brand/30 transition-colors"
+                  className="bg-surface border border-border-default rounded-lg px-4 py-2.5 flex items-center gap-3 hover:border-green-brand/30 transition-colors"
                 >
                   <span className="text-xs font-mono text-text-muted">{t?.source_id ?? tid.slice(0, 8)}</span>
                   <span className="text-sm text-text-primary truncate">{t?.title ?? tid}</span>

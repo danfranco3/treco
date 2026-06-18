@@ -19,8 +19,8 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
       className={cn(
         "px-3 py-1 rounded-full text-xs border transition-colors",
         active
-          ? "bg-cyan-brand/10 border-cyan-brand/40 text-cyan-brand"
-          : "border-border-default text-text-muted hover:text-text-primary hover:border-gray-600"
+          ? "bg-green-brand/10 border-green-brand/40 text-green-brand"
+          : "border-border-default text-text-muted hover:text-text-primary hover:border-stone-400"
       )}
     >
       {label}

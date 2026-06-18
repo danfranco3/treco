@@ -49,7 +49,7 @@ export function AssignAgentPanel({ ticketId, ticket, workspaceId, idleAgents }: 
 
       <button
         onClick={implementModal.onOpen}
-        className="text-xs bg-cyan-brand text-black font-semibold hover:bg-cyan-brand/90 px-3 py-2 rounded-lg transition-colors"
+        className="text-xs bg-green-brand text-white font-semibold hover:bg-green-brand-2 px-3 py-2 rounded-lg transition-colors"
       >
         Implement
       </button>
@@ -68,7 +68,7 @@ export function AssignAgentPanel({ ticketId, ticket, workspaceId, idleAgents }: 
             <select
               value={selected}
               onChange={(e) => setSelected(e.target.value)}
-              className="flex-1 bg-surface-2 border border-border-default rounded-lg px-2 py-1.5 text-sm text-text-primary outline-none focus:border-cyan-brand/60"
+              className="flex-1 bg-surface-2 border border-border-default rounded-lg px-2 py-1.5 text-sm text-text-primary outline-none focus:border-green-brand/60"
             >
               {idleAgents.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -79,7 +79,7 @@ export function AssignAgentPanel({ ticketId, ticket, workspaceId, idleAgents }: 
             <button
               onClick={handleAssign}
               disabled={loading || !selected}
-              className="text-xs bg-cyan-brand/10 border border-cyan-brand/40 text-cyan-brand hover:bg-cyan-brand/20 px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors"
+              className="text-xs bg-green-brand/10 border border-green-brand/40 text-green-brand hover:bg-green-brand/20 px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors"
             >
               {loading ? "Assigning…" : "Assign"}
             </button>
@@ -94,7 +94,7 @@ export function AssignAgentPanel({ ticketId, ticket, workspaceId, idleAgents }: 
         <code className="flex-1 text-xs font-mono text-text-muted truncate">{launchCmd}</code>
         <button
           onClick={() => copy(launchCmd)}
-          className="text-xs border border-border-default hover:border-cyan-brand/40 text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors flex-shrink-0"
+          className="text-xs border border-border-default hover:border-green-brand/40 text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors flex-shrink-0"
         >
           {copied ? "Copied!" : "Copy"}
         </button>

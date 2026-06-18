@@ -13,7 +13,7 @@ function MiniProgressRing({ pct }: { pct: number }) {
   const r = 9;
   const circ = 2 * Math.PI * r;
   const offset = circ * (1 - pct / 100);
-  const color = pct === 100 ? "var(--green)" : pct > 50 ? "var(--cyan)" : "var(--amber)";
+  const color = pct === 100 ? "var(--green)" : pct > 50 ? "var(--green)" : "var(--amber)";
 
   return (
     <svg width={24} height={24} viewBox="0 0 24 24" fill="none" className="-rotate-90" aria-hidden="true">
@@ -71,7 +71,7 @@ export function TicketRow({ ticket }: { ticket: Ticket }) {
         onChange={handleAssign}
         onClick={(e) => e.stopPropagation()}
         disabled={assigning}
-        className="bg-transparent border border-border-default rounded-lg px-2 py-1 text-xs text-text-muted outline-none focus:border-cyan-brand/60 disabled:opacity-50"
+        className="bg-transparent border border-border-default rounded-lg px-2 py-1 text-xs text-text-muted outline-none focus:border-green-brand/60 disabled:opacity-50"
       >
         <option value="">unassigned</option>
         {workspaces.map((w) => (

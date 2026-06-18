@@ -98,7 +98,7 @@ export function CostPanel({ cost, events }: CostPanelProps) {
             </BarChart>
           </ResponsiveContainer>
           <div className="flex gap-4 mt-1 text-xs text-text-muted">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-cyan-brand/70 inline-block" />in</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-green-brand/70 inline-block" />in</span>
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-purple-brand/70 inline-block" />out</span>
           </div>
         </Card>

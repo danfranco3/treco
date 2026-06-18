@@ -45,7 +45,7 @@ export function NewWorkspaceModal({ onClose }: NewWorkspaceModalProps) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="my-project"
-            className="bg-surface-2 border border-border-default rounded-lg px-2 py-1.5 text-sm text-text-primary outline-none focus:border-cyan-brand/60"
+            className="bg-surface-2 border border-border-default rounded-lg px-2 py-1.5 text-sm text-text-primary outline-none focus:border-green-brand/60"
           />
         </div>
 
@@ -79,7 +79,7 @@ export function NewWorkspaceModal({ onClose }: NewWorkspaceModalProps) {
           <button
             onClick={handleSubmit}
             disabled={loading || !name.trim() || !repoPath.trim()}
-            className="text-xs bg-cyan-brand/10 border border-cyan-brand/40 text-cyan-brand hover:bg-cyan-brand/20 px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors"
+            className="text-xs bg-green-brand/10 border border-green-brand/40 text-green-brand hover:bg-green-brand/20 px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors"
           >
             {loading ? "Creating…" : "Create workspace"}
           </button>
