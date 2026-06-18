@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -17,8 +17,11 @@ class Agent(Base):
     # Hashed SDK API key
     api_key_hash: Mapped[str] = mapped_column(String, unique=True)
 
-    status: Mapped[str] = mapped_column(String, default="idle")  # idle | working | done | error
+    status: Mapped[str] = mapped_column(String, default="idle")  # idle | working | awaiting_approval | error
     current_ticket_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    # PID of the spawned subprocess while status == "working"
+    pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -1,7 +1,7 @@
 import asyncio
-import hashlib
 import json
-import secrets
+import os
+import signal
 import uuid
 from datetime import datetime
 
@@ -11,10 +11,11 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
-from app.core.database import get_db
+from app.core.constants import AgentStatus, EventType
+from app.core.database import get_db, get_or_404
 from app.models.agent import Agent
 from app.models.event import AgentEvent
+from app.services.auth import generate_api_key, resolve_agent
 
 router = APIRouter()
 
@@ -40,15 +41,14 @@ class CreateAgentResponse(AgentResponse):
 
 @router.post("/", response_model=CreateAgentResponse)
 async def create_agent(req: CreateAgentRequest, db: AsyncSession = Depends(get_db)):
-    raw_key = settings.sdk_key_prefix + secrets.token_urlsafe(32)
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    raw_key, key_hash = generate_api_key()
 
     agent = Agent(
         id=str(uuid.uuid4()),
         workspace_id=req.workspace_id,
         name=req.name,
         api_key_hash=key_hash,
-        status="idle",
+        status=AgentStatus.IDLE,
     )
     db.add(agent)
     await db.commit()
@@ -64,7 +64,7 @@ async def create_agent(req: CreateAgentRequest, db: AsyncSession = Depends(get_d
     )
 
 
-@router.get("/")
+@router.get("/", response_model=list[AgentResponse])
 async def list_agents(workspace_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Agent).where(Agent.workspace_id == workspace_id)
@@ -77,18 +77,14 @@ async def get_me(
     x_agent_key: str = Header(..., alias="X-Agent-Key"),
     db: AsyncSession = Depends(get_db),
 ):
-    key_hash = hashlib.sha256(x_agent_key.encode()).hexdigest()
-    result = await db.execute(select(Agent).where(Agent.api_key_hash == key_hash))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=401, detail="Invalid agent API key")
-    return agent
+    return await resolve_agent(x_agent_key, db)
 
 
 @router.get("/stream")
 async def agent_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
     async def generator():
         last_snapshot: dict[str, str] = {}
+        tick = 0
         while True:
             result = await db.execute(
                 select(Agent).where(Agent.workspace_id == workspace_id)
@@ -106,16 +102,50 @@ async def agent_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
                             "workspace_id": agent.workspace_id,
                         })
                     }
-            await asyncio.sleep(0.5)
+            tick += 1
+            if tick % 30 == 0:
+                yield {"comment": "keepalive"}
+            try:
+                await asyncio.sleep(0.5)
+            except asyncio.CancelledError:
+                return
 
     return EventSourceResponse(generator())
 
 
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
-    agent = await db.get(Agent, agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    return await get_or_404(db, Agent, agent_id)
+
+
+@router.post("/{agent_id}/cancel", response_model=AgentResponse)
+async def cancel_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
+    agent = await get_or_404(db, Agent, agent_id)
+    ticket_id = agent.current_ticket_id
+
+    if agent.pid is not None:
+        try:
+            os.kill(agent.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+    agent.status = AgentStatus.IDLE
+    agent.pid = None
+    agent.current_ticket_id = None
+    db.add(agent)
+
+    if ticket_id:
+        db.add(AgentEvent(
+            id=str(uuid.uuid4()),
+            agent_id=agent.id,
+            ticket_id=ticket_id,
+            workspace_id=agent.workspace_id,
+            event_type=EventType.ERROR,
+            payload={"reason": "cancelled"},
+        ))
+
+    await db.commit()
+    await db.refresh(agent)
     return agent
 
 
@@ -129,13 +159,11 @@ async def assign_ticket(
     req: AssignRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    agent = await db.get(Agent, agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if agent.status == "working":
+    agent = await get_or_404(db, Agent, agent_id)
+    if agent.status == AgentStatus.WORKING:
         raise HTTPException(status_code=409, detail="Agent already working on a ticket")
 
-    agent.status = "working"
+    agent.status = AgentStatus.WORKING
     agent.current_ticket_id = req.ticket_id
     agent.last_seen_at = datetime.utcnow()
     db.add(agent)
@@ -145,7 +173,7 @@ async def assign_ticket(
         agent_id=agent.id,
         ticket_id=req.ticket_id,
         workspace_id=agent.workspace_id,
-        event_type="ticket_started",
+        event_type=EventType.TICKET_STARTED,
         payload={"source": "ui_assign"},
     )
     db.add(event)

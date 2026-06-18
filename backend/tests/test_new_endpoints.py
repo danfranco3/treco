@@ -1,83 +1,14 @@
 """Tests for endpoints added in the real-time / launch-agent phase."""
-import hashlib
-import secrets
 import uuid
 
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import Base, get_db
-from app.main import app
 from app.models.agent import Agent
 from app.models.event import AgentEvent
 from app.models.ticket import Ticket
-
-DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-
-engine = create_async_engine(DATABASE_URL, echo=False)
-TestSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-async def override_get_db():
-    async with TestSessionLocal() as session:
-        yield session
-
-
-app.dependency_overrides[get_db] = override_get_db
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def setup_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-
-
-@pytest_asyncio.fixture
-async def client():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
-
-
-@pytest_asyncio.fixture
-async def agent_with_key():
-    raw_key = "treco_" + secrets.token_urlsafe(16)
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-    async with TestSessionLocal() as db:
-        agent = Agent(
-            id=str(uuid.uuid4()),
-            workspace_id="ws1",
-            name="test-agent",
-            api_key_hash=key_hash,
-            status="idle",
-        )
-        db.add(agent)
-        await db.commit()
-        await db.refresh(agent)
-        return agent, raw_key
-
-
-@pytest_asyncio.fixture
-async def ticket():
-    async with TestSessionLocal() as db:
-        t = Ticket(
-            id=str(uuid.uuid4()),
-            workspace_id="ws1",
-            source="custom",
-            title="Test ticket",
-            status="open",
-            body={},
-            acceptance_criteria=[{"id": str(uuid.uuid4()), "text": "do the thing", "done": False}],
-        )
-        db.add(t)
-        await db.commit()
-        await db.refresh(t)
-        return t
+from tests.shared import TestSessionLocal
 
 
 class TestWorkspaceEventsEndpoint:
@@ -234,6 +165,113 @@ class TestLastSeenAtUpdated:
         async with TestSessionLocal() as db:
             refreshed = await db.get(Agent, agent.id)
             assert refreshed.last_seen_at is not None
+
+
+class TestEventAuth:
+    @pytest.mark.asyncio
+    async def test_post_event_without_key_returns_422(self, client, ticket):
+        r = await client.post(
+            "/api/events/",
+            json={"ticket_id": ticket.id, "event_type": "log", "payload": {}},
+        )
+        # Missing required header → 422 (FastAPI validates Header(...) as required)
+        assert r.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_post_event_invalid_key_returns_401(self, client, ticket):
+        r = await client.post(
+            "/api/events/",
+            json={"ticket_id": ticket.id, "event_type": "log", "payload": {}},
+            headers={"X-Agent-Key": "treco_invalid_key_xyz"},
+        )
+        assert r.status_code == 401
+
+
+class TestImplementTicket:
+    @pytest.mark.asyncio
+    async def test_implement_spawns_agent(self, client, ticket):
+        from unittest.mock import AsyncMock, patch
+
+        async with TestSessionLocal() as db:
+            from app.models.workspace import Workspace
+            ws = Workspace(id="ws1", name="test-ws", repo_path="/tmp/repo")
+            db.add(ws)
+            await db.commit()
+
+        with patch("app.api.routes.tickets.agent_runner.mint_agent") as mock_mint, \
+             patch("app.api.routes.tickets.agent_runner.spawn_agent_run") as mock_spawn:
+            from app.models.agent import Agent as AgentModel
+            import hashlib, secrets
+            raw_key = "treco_" + secrets.token_urlsafe(16)
+            key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+            fake_agent = AgentModel(
+                id=str(uuid.uuid4()),
+                workspace_id="ws1",
+                name="agent-test",
+                api_key_hash=key_hash,
+                status="idle",
+            )
+            mock_mint.return_value = (fake_agent, raw_key)
+            mock_spawn.return_value = None
+
+            r = await client.post(
+                f"/api/tickets/{ticket.id}/implement",
+                json={"prompt": "implement this ticket"},
+            )
+
+        assert r.status_code == 200
+        data = r.json()
+        assert "agent_id" in data
+        assert "agent_name" in data
+
+    @pytest.mark.asyncio
+    async def test_implement_ticket_without_workspace_returns_400(self, client):
+        async with TestSessionLocal() as db:
+            t = Ticket(
+                id=str(uuid.uuid4()),
+                workspace_id=None,
+                source="custom",
+                title="No workspace ticket",
+                status="open",
+                body={},
+                acceptance_criteria=[],
+            )
+            db.add(t)
+            await db.commit()
+            ticket_id = t.id
+
+        r = await client.post(
+            f"/api/tickets/{ticket_id}/implement",
+            json={"prompt": "do something"},
+        )
+        assert r.status_code == 400
+
+
+class TestImportTicketDedup:
+    @pytest.mark.asyncio
+    async def test_import_same_ticket_twice_no_duplicate(self, client):
+        raw_jira = {
+            "key": "PROJ-1",
+            "fields": {
+                "summary": "Fix the bug",
+                "description": None,
+                "status": {"name": "To Do"},
+            },
+        }
+        payload = {"source": "jira", "workspace_id": "ws1", "raw": raw_jira}
+
+        r1 = await client.post("/api/tickets/import", json=payload)
+        assert r1.status_code == 200
+
+        r2 = await client.post("/api/tickets/import", json=payload)
+        assert r2.status_code == 200
+
+        # Both return the same ticket id
+        assert r1.json()["id"] == r2.json()["id"]
+
+        # Only one ticket in DB
+        listing = await client.get("/api/tickets/?workspace_id=ws1")
+        assert len(listing.json()) == 1
 
 
 class TestGraphQLInjectionValidation:

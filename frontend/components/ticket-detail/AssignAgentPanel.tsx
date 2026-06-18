@@ -3,28 +3,29 @@
 import { useState } from "react";
 import { useSWRConfig } from "swr";
 import { assignTicket } from "@/lib/api";
-import type { Agent } from "@/lib/types";
+import type { Agent, Ticket } from "@/lib/types";
+import { useWorkspace } from "@/lib/workspace";
+import { useModal, useCopyToClipboard } from "@/lib/hooks";
+import { ImplementModal } from "./ImplementModal";
 
 interface AssignAgentPanelProps {
   ticketId: string;
+  ticket: Ticket;
+  workspaceId: string;
   idleAgents: Agent[];
 }
 
-export function AssignAgentPanel({ ticketId, idleAgents }: AssignAgentPanelProps) {
+export function AssignAgentPanel({ ticketId, ticket, workspaceId, idleAgents }: AssignAgentPanelProps) {
   const { mutate } = useSWRConfig();
+  const { workspaces } = useWorkspace();
+  const workspace = workspaces.find((w) => w.id === ticket.workspace_id) ?? null;
   const [selected, setSelected] = useState(idleAgents[0]?.id ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard();
+  const implementModal = useModal();
 
   const launchCmd = `treco start ${ticketId}`;
-
-  function copyCmd() {
-    navigator.clipboard.writeText(launchCmd).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }
 
   async function handleAssign() {
     if (!selected) return;
@@ -32,7 +33,6 @@ export function AssignAgentPanel({ ticketId, idleAgents }: AssignAgentPanelProps
     setError("");
     try {
       await assignTicket(selected, ticketId);
-      // Optimistically update agent + ticket state; SSE will confirm
       mutate(["ticket", ticketId]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to assign agent");
@@ -46,6 +46,21 @@ export function AssignAgentPanel({ ticketId, idleAgents }: AssignAgentPanelProps
       <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">
         No agent working this ticket
       </h3>
+
+      <button
+        onClick={implementModal.onOpen}
+        className="text-xs bg-cyan-brand text-black font-semibold hover:bg-cyan-brand/90 px-3 py-2 rounded-lg transition-colors"
+      >
+        Implement
+      </button>
+      {implementModal.open && (
+        <ImplementModal
+          ticket={ticket}
+          workspace={workspace}
+          workspaceId={workspaceId}
+          onClose={implementModal.onClose}
+        />
+      )}
 
       {idleAgents.length > 0 ? (
         <>
@@ -78,7 +93,7 @@ export function AssignAgentPanel({ ticketId, idleAgents }: AssignAgentPanelProps
       <div className="border-t border-border-default pt-3 flex items-center gap-2">
         <code className="flex-1 text-xs font-mono text-text-muted truncate">{launchCmd}</code>
         <button
-          onClick={copyCmd}
+          onClick={() => copy(launchCmd)}
           className="text-xs border border-border-default hover:border-cyan-brand/40 text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors flex-shrink-0"
         >
           {copied ? "Copied!" : "Copy"}

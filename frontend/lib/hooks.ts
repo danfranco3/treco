@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import {
   fetchAgentEvents,
@@ -13,13 +13,15 @@ import {
 } from "./api";
 import type { Agent, AgentEvent } from "./types";
 
+const POLL = { refreshInterval: 30_000, revalidateOnFocus: false } as const;
+
 // ── polling hooks (SSE is primary; these are fallback / initial load) ─────────
 
 export function useTickets(workspaceId: string) {
   return useSWR(
     workspaceId ? ["tickets", workspaceId] : null,
     () => fetchTickets(workspaceId),
-    { refreshInterval: 30_000, revalidateOnFocus: false }
+    POLL
   );
 }
 
@@ -27,7 +29,7 @@ export function useTicket(ticketId: string) {
   return useSWR(
     ticketId ? ["ticket", ticketId] : null,
     () => fetchTicket(ticketId),
-    { refreshInterval: 30_000, revalidateOnFocus: false }
+    POLL
   );
 }
 
@@ -35,7 +37,7 @@ export function useAgents(workspaceId: string) {
   return useSWR(
     workspaceId ? ["agents", workspaceId] : null,
     () => fetchAgents(workspaceId),
-    { refreshInterval: 30_000, revalidateOnFocus: false }
+    POLL
   );
 }
 
@@ -43,7 +45,7 @@ export function useTicketEvents(ticketId: string) {
   return useSWR(
     ticketId ? ["events", ticketId] : null,
     () => fetchTicketEvents(ticketId),
-    { refreshInterval: 30_000, revalidateOnFocus: false }
+    POLL
   );
 }
 
@@ -51,7 +53,7 @@ export function useTicketCost(ticketId: string) {
   return useSWR(
     ticketId ? ["cost", ticketId] : null,
     () => fetchTicketCost(ticketId),
-    { refreshInterval: 30_000, revalidateOnFocus: false }
+    POLL
   );
 }
 
@@ -59,7 +61,7 @@ export function useWorkspaceEvents(workspaceId: string) {
   return useSWR(
     workspaceId ? ["workspace-events", workspaceId] : null,
     () => fetchWorkspaceEvents(workspaceId),
-    { refreshInterval: 30_000, revalidateOnFocus: false }
+    POLL
   );
 }
 
@@ -67,8 +69,26 @@ export function useAgentEvents(agentId: string) {
   return useSWR(
     agentId ? ["agent-events", agentId] : null,
     () => fetchAgentEvents(agentId),
-    { refreshInterval: 30_000, revalidateOnFocus: false }
+    POLL
   );
+}
+
+// ── utility hooks ─────────────────────────────────────────────────────────────
+
+export function useModal() {
+  const [open, setOpen] = useState(false);
+  return { open, onOpen: () => setOpen(true), onClose: () => setOpen(false) };
+}
+
+export function useCopyToClipboard(timeoutMs = 2000) {
+  const [copied, setCopied] = useState(false);
+  function copy(text: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), timeoutMs);
+    });
+  }
+  return { copied, copy };
 }
 
 // ── SSE stream hooks ──────────────────────────────────────────────────────────

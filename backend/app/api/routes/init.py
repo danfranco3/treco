@@ -1,5 +1,3 @@
-import hashlib
-import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,9 +5,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.constants import AgentStatus
 from app.core.database import get_db
 from app.models.agent import Agent
+from app.models.workspace import Workspace
+from app.services.auth import generate_api_key
 
 router = APIRouter()
 
@@ -39,15 +39,20 @@ async def init_workspace(req: InitRequest, db: AsyncSession = Depends(get_db)):
             detail="Agent with this name already exists in workspace. Use a different name or delete the existing agent.",
         )
 
-    raw_key = settings.sdk_key_prefix + secrets.token_urlsafe(32)
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    workspace = await db.get(Workspace, req.workspace_id)
+    if not workspace:
+        workspace = Workspace(id=req.workspace_id, name=req.workspace_id, repo_path=None)
+        db.add(workspace)
+        await db.commit()
+
+    raw_key, key_hash = generate_api_key()
 
     agent = Agent(
         id=str(uuid.uuid4()),
         workspace_id=req.workspace_id,
         name=req.agent_name,
         api_key_hash=key_hash,
-        status="idle",
+        status=AgentStatus.IDLE,
     )
     db.add(agent)
     await db.commit()

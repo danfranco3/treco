@@ -1,5 +1,8 @@
 from typing import Any
 
+import httpx
+from fastapi import HTTPException
+
 from app.services.adapters.base import NormalizedTicket, TicketAdapter
 
 _STATUS_MAP = {
@@ -9,6 +12,13 @@ _STATUS_MAP = {
     "Cancelled": "done",
     "Backlog": "open",
 }
+
+_ISSUE_FIELDS = """
+    identifier
+    title
+    description
+    state { name }
+"""
 
 
 class LinearAdapter(TicketAdapter):
@@ -25,3 +35,36 @@ class LinearAdapter(TicketAdapter):
     def extract_status(self, raw: dict[str, Any]) -> str:
         state_name = raw.get("state", {}).get("name", "")
         return _STATUS_MAP.get(state_name, "open")
+
+    async def fetch_issue(self, issue_id: str, api_key: str) -> NormalizedTicket:
+        query = f"query($id: String!) {{ issue(id: $id) {{ {_ISSUE_FIELDS} }} }}"
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "https://api.linear.app/graphql",
+                json={"query": query, "variables": {"id": issue_id}},
+                headers={"Authorization": api_key, "Content-Type": "application/json"},
+            )
+            r.raise_for_status()
+        issue = (r.json().get("data") or {}).get("issue")
+        if not issue:
+            raise HTTPException(status_code=404, detail="Issue not found")
+        return self.normalize(issue)
+
+    async def fetch_issues(self, team_key: str | None, token: str, limit: int = 20) -> list[NormalizedTicket]:
+        if team_key:
+            query = f"query($teamKey: String!) {{ issues(filter: {{ team: {{ key: {{ eq: $teamKey }} }} }}) {{ nodes {{ {_ISSUE_FIELDS} }} }} }}"
+            variables: dict[str, Any] = {"teamKey": team_key}
+        else:
+            query = f"query {{ issues(first: 50) {{ nodes {{ {_ISSUE_FIELDS} }} }} }}"
+            variables = {}
+
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                "https://api.linear.app/graphql",
+                json={"query": query, "variables": variables},
+                headers={"Authorization": token, "Content-Type": "application/json"},
+            )
+            r.raise_for_status()
+
+        nodes = ((r.json().get("data") or {}).get("issues") or {}).get("nodes", [])
+        return [self.normalize(n) for n in nodes[:limit]]

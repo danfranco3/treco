@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -e
-echo "Installing Treco..."
-pip install treco
+echo "Installing Treco (CLI + backend server)..."
+pip install "treco[server]"
 echo ""
-echo "Next: treco init"
+echo "Done. Next steps:"
+echo ""
+echo "  Option A — full stack with dashboard (requires Docker):"
+echo "    git clone https://github.com/danfranco3/treco && cd treco"
+echo "    cp backend/.env.example backend/.env && docker compose up"
+echo "    treco init  # enter http://localhost:8001"
+echo ""
+echo "  Option B — CLI + backend only (no dashboard):"
+echo "    treco init"
+echo ""

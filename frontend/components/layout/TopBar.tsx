@@ -2,9 +2,10 @@
 
 import { useWorkspace } from "@/lib/workspace";
 import { useAgents } from "@/lib/hooks";
+import { WorkspaceTabs } from "./WorkspaceTabs";
 
 export function TopBar() {
-  const { workspaceId, setWorkspaceId } = useWorkspace();
+  const { workspaceId } = useWorkspace();
   const { data: agents } = useAgents(workspaceId);
 
   const working = agents?.filter((a) => a.status === "working").length ?? 0;
@@ -23,15 +24,7 @@ export function TopBar() {
         )}
       </div>
 
-      <div className="flex items-center gap-2">
-        <span className="text-text-muted text-xs">workspace</span>
-        <input
-          type="text"
-          value={workspaceId}
-          onChange={(e) => setWorkspaceId(e.target.value)}
-          className="bg-surface-2 border border-border-default rounded px-2 py-1 text-xs text-text-primary w-32 focus:outline-none focus:border-cyan-brand/50"
-        />
-      </div>
+      <WorkspaceTabs />
     </header>
   );
 }

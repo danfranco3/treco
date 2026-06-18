@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
-import { useWorkspace } from "@/lib/workspace";
 import { fetchTickets } from "@/lib/api";
 import { TicketRow } from "@/components/tickets/TicketRow";
 import { TicketFilter } from "@/components/tickets/TicketFilter";
@@ -14,14 +13,13 @@ import { Card } from "@/components/ui/Card";
 const PAGE_SIZE = 50;
 
 export default function TicketsPage() {
-  const { workspaceId } = useWorkspace();
   const [source, setSource] = useState("all");
   const [status, setStatus] = useState("all");
   const [offset, setOffset] = useState(0);
 
   const { data: tickets = [], isLoading } = useSWR(
-    workspaceId ? ["tickets", workspaceId, offset] : null,
-    () => fetchTickets(workspaceId, PAGE_SIZE, offset),
+    ["tickets", "all", offset],
+    () => fetchTickets(undefined, PAGE_SIZE, offset),
     { refreshInterval: 30_000, revalidateOnFocus: false }
   );
 

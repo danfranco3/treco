@@ -17,7 +17,7 @@ class Ticket(Base):
     __tablename__ = "tickets"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    workspace_id: Mapped[str] = mapped_column(String, index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
     # source: 'jira' | 'linear' | 'asana' | 'github' | 'custom'
     source: Mapped[str] = mapped_column(String, index=True)

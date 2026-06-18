@@ -19,7 +19,8 @@ def _backend_dir() -> Path | None:
         return Path(env_dir)
     pkg = Path(__file__).parent
     candidates = [
-        pkg.parent.parent.parent,
+        pkg / "_backend",                  # bundled in pip package
+        pkg.parent.parent.parent,          # dev: sdk/python/treco/../../../ = backend/
         Path.home() / ".treco" / "backend",
     ]
     for c in candidates:
@@ -32,10 +33,24 @@ def start(port: int = DEFAULT_PORT) -> None:
     if is_running():
         print(f"Treco server already running (PID {_read_pid()})")
         return
+
+    # Check uvicorn is available before trying to spawn
+    try:
+        import uvicorn  # noqa: F401
+    except ImportError:
+        print(
+            "Server dependencies not installed.\n"
+            "Run: pip install \"treco[server]\"",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     backend = _backend_dir()
     if not backend:
         print(
-            "Backend not found. Set TRECO_BACKEND_DIR or install treco[server].",
+            "Backend source not found.\n"
+            "Set TRECO_BACKEND_DIR to your cloned repo's backend/ directory,\n"
+            "or run from inside the cloned repo.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -52,7 +67,9 @@ def start(port: int = DEFAULT_PORT) -> None:
         start_new_session=True,
     )
     PID_FILE.write_text(str(proc.pid))
-    print(f"Treco server started (PID {proc.pid}) on http://localhost:{port}")
+    print(f"Treco server started (PID {proc.pid})")
+    print(f"  Dashboard: http://localhost:{port}")
+    print(f"  API docs:  http://localhost:{port}/docs")
 
 
 def stop() -> None:

@@ -39,7 +39,7 @@ export default function DashboardPage() {
         <div className="col-span-2 flex flex-col gap-6">
           <Card>
             <h2 className="text-sm font-semibold text-text-primary mb-4">Agents</h2>
-            <AgentStatusGrid agents={agents} tickets={tickets} />
+            <AgentStatusGrid agents={agents} tickets={tickets} events={events} />
           </Card>
 
           <Card>

@@ -4,50 +4,62 @@ Real-time observability for AI coding agents. See which agents are working on wh
 
 Works with Claude Code out of the box. Any HTTP-capable agent (LangChain, CrewAI, AutoGen, custom) works via the Python SDK.
 
-![Dashboard: agent kanban, live event feed, criteria burndown]
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/danfranco3/treco)
+
+![Treco dashboard — agent kanban, live event feed, criteria burndown](docs/dashboard.png)
 
 ---
 
 ## Quick start
 
-### Option A — CLI (Claude Code users)
+### Option A — Docker (full stack, one command)
 
-```bash
-pip install treco
-treco init
-```
-
-`treco init` registers an agent, starts a local backend server, and wires Claude Code hooks automatically. Open http://localhost:3000 to see the dashboard.
-
-Then before each session:
-
-```bash
-treco import https://github.com/org/repo/issues/42   # or a Linear/Jira URL
-treco start                                           # assigns the ticket to your agent
-claude "implement the issue"                          # runs normally; Treco captures everything
-```
-
-Treco shows live: agent active, token usage, criteria ticking off.
-
-### Option B — Docker Compose (full stack)
+Requires Docker. Gives you the backend API + full dashboard.
 
 ```bash
 git clone https://github.com/danfranco3/treco
 cd treco
 cp backend/.env.example backend/.env
-# Edit backend/.env — set JWT_SECRET (required for production)
-
 docker compose up
 ```
 
-Frontend: http://localhost:3000 · Backend: http://localhost:8001
+Dashboard: http://localhost:3000 · API: http://localhost:8001
 
-Seed demo data:
+Then install the CLI and point it at your local instance:
+
+```bash
+pip install "treco[server]"
+treco init  # enter http://localhost:8001 when prompted
+treco import https://github.com/org/repo/issues/42
+treco start
+claude "implement the issue"
+```
+
+Seed demo data to see the dashboard with live-looking data:
 
 ```bash
 pip install httpx
 python backend/scripts/seed_demo.py
 ```
+
+---
+
+### Option B — pip install (full stack, no Docker)
+
+Requires Python 3.11+. No Docker, no Node.js required at runtime. Runs backend + dashboard from a single port.
+
+```bash
+pip install "treco[server]"
+treco server start        # backend + dashboard at http://localhost:8001
+treco init                # registers agent, wires Claude Code hooks
+treco import https://github.com/org/repo/issues/42
+treco start
+claude "implement the issue"
+```
+
+Dashboard: http://localhost:8001 · API docs: http://localhost:8001/docs
+
+> **Note:** The pip package bundles a pre-built UI. To get the latest UI from source, run `make build-package` after cloning.
 
 ---
 
@@ -192,7 +204,7 @@ Acceptance criteria are extracted from the description via LLM on import (requir
 | `LLM_PROVIDER` | `anthropic` | `anthropic` or `openai` |
 | `ANTHROPIC_API_KEY` | — | For LLM criteria extraction |
 | `OPENAI_API_KEY` | — | Alternative LLM provider |
-| `CORS_ORIGINS` | `["http://localhost:3000"]` | Add your frontend origin |
+| `CORS_ORIGINS` | `["http://localhost:3000","http://localhost:8001"]` | Add your frontend origin |
 
 ---
 

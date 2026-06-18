@@ -37,8 +37,8 @@ from pathlib import Path
 import httpx
 
 CONFIG_DIR = Path.home() / ".treco"
-CONFIG_FILE = CONFIG_DIR / "config.json"
-SESSION_FILE = Path.home() / ".treco_session"
+CONFIG_FILE = Path(os.environ.get("TRECO_CONFIG_FILE", str(CONFIG_DIR / "config.json")))
+SESSION_FILE = Path(os.environ.get("TRECO_SESSION_FILE", str(Path.home() / ".treco_session")))
 
 # ── config ────────────────────────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@ def load_config() -> dict:
 
 
 def save_config(cfg: dict) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
     CONFIG_FILE.chmod(0o600)
 
@@ -209,8 +209,9 @@ def cmd_init():
     _install_hooks()
 
     print("\nSetup complete.")
-    print(f"  Agent created in workspace '{workspace_id}'")
+    print(f"  Agent: {socket.gethostname()} in workspace '{workspace_id}'")
     print(f"  Backend: {base_url}")
+    print(f"  Dashboard: {base_url}  (if server is running)")
     print("  Claude Code hooks installed")
     print("\nNext steps:")
     print("  treco import <github-issue-url>")
@@ -641,13 +642,23 @@ def _run_post_tool_use():
             return
 
         tool_name = payload.get("tool_name", "")
+        tool_input = payload.get("tool_input", {}) or {}
+        file_path = tool_input.get("file_path")
+        command = tool_input.get("command", "")
+        if tool_name == "Bash" and command:
+            command = command[:120]
+        detail = file_path or command
         asyncio.run(post_event(
             {"api_key": api_key, "base_url": base_url},
             s["ticket_id"], "log",
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             model=payload.get("model"),
-            payload={"tool": tool_name, "message": f"tool: {tool_name}"},
+            payload={
+                "tool": tool_name,
+                "file_path": file_path,
+                "message": f"{tool_name}: {detail}"[:200],
+            },
         ))
 
 

@@ -20,10 +20,13 @@ class Settings(BaseSettings):
     llm_provider: Literal["anthropic", "openai"] = Field("anthropic", alias="LLM_PROVIDER")
 
     # CORS
-    cors_origins: list[str] = Field(["http://localhost:3000"], alias="CORS_ORIGINS")
+    cors_origins: list[str] = Field(["http://localhost:3000", "http://localhost:8001"], alias="CORS_ORIGINS")
 
     # Agent SDK
     sdk_key_prefix: str = "treco_"
+
+    # Base URL spawned agent subprocesses use to reach this backend
+    backend_url: str = Field("http://localhost:8001", alias="BACKEND_URL")
 
     model_config = SettingsConfigDict(env_file=".env", populate_by_name=True)
 

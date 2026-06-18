@@ -1,7 +1,13 @@
 import json
 import re
+import uuid
+from typing import Any
 
 from app.core.config import settings
+
+
+def create_criterion(text: str, done: bool = False) -> dict[str, Any]:
+    return {"id": str(uuid.uuid4()), "text": text, "done": done}
 
 
 async def extract_criteria(title: str, description: str | None) -> list[dict]:
@@ -31,7 +37,6 @@ Description: {description}"""
 
 async def _extract_with_anthropic(prompt: str) -> list[dict]:
     import anthropic
-    import uuid
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     message = await client.messages.create(
@@ -49,8 +54,6 @@ async def _extract_with_anthropic(prompt: str) -> list[dict]:
 
 
 async def _extract_with_openai(prompt: str) -> list[dict]:
-    import uuid
-
     import openai
 
     client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
@@ -76,13 +79,10 @@ def _extract_json(text: str) -> str:
 
 
 def _parse_checkboxes(description: str) -> list[dict]:
-    import uuid
-
     criteria = []
     for line in description.splitlines():
         stripped = line.strip()
         if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
             done = stripped.startswith("- [x]")
-            text = stripped[5:].strip()
-            criteria.append({"id": str(uuid.uuid4()), "text": text, "done": done})
+            criteria.append(create_criterion(stripped[5:].strip(), done))
     return criteria

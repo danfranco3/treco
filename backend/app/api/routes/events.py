@@ -1,31 +1,49 @@
 import asyncio
-import hashlib
 import json
 import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Header
+from pydantic import BaseModel, ConfigDict
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import AgentStatus, EventType
 from app.core.database import get_db
 from app.models.agent import Agent
 from app.models.event import AgentEvent
+from app.models.ticket import Ticket
+from app.services.auth import resolve_agent
 
 router = APIRouter()
 
 
 class EventRequest(BaseModel):
     ticket_id: str
-    event_type: Literal["ticket_started", "criterion_checked", "criterion_failed", "pr_opened", "done", "error", "log"]
+    event_type: Literal["ticket_started", "criterion_checked", "criterion_failed", "pr_opened", "done", "error", "log", "heartbeat", "deviation"]
     criterion_id: str | None = None
     tokens_in: int = 0
     tokens_out: int = 0
     model: str | None = None
     payload: dict = {}
+
+
+class EventResponse(BaseModel):
+    id: str
+    agent_id: str
+    ticket_id: str
+    workspace_id: str
+    event_type: str
+    criterion_id: str | None
+    tokens_in: int
+    tokens_out: int
+    model: str | None
+    payload: dict[str, Any]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CostSummary(BaseModel):
@@ -35,22 +53,13 @@ class CostSummary(BaseModel):
     event_count: int
 
 
-async def _resolve_agent(api_key: str, db: AsyncSession) -> Agent:
-    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-    result = await db.execute(select(Agent).where(Agent.api_key_hash == key_hash))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=401, detail="Invalid agent API key")
-    return agent
-
-
 @router.post("/")
 async def post_event(
     req: EventRequest,
     x_agent_key: str = Header(..., alias="X-Agent-Key"),
     db: AsyncSession = Depends(get_db),
 ):
-    agent = await _resolve_agent(x_agent_key, db)
+    agent = await resolve_agent(x_agent_key, db)
     agent.last_seen_at = datetime.utcnow()
 
     event = AgentEvent(
@@ -67,18 +76,20 @@ async def post_event(
     )
     db.add(event)
 
-    if req.event_type == "ticket_started":
-        agent.status = "working"
+    if req.event_type == EventType.TICKET_STARTED:
+        agent.status = AgentStatus.WORKING
         agent.current_ticket_id = req.ticket_id
-    elif req.event_type in ("done", "error"):
-        agent.status = "idle" if req.event_type == "done" else "error"
+    elif req.event_type in (EventType.DONE, EventType.ERROR):
+        agent.status = AgentStatus.IDLE if req.event_type == EventType.DONE else AgentStatus.ERROR
         agent.current_ticket_id = None
-    elif req.event_type == "criterion_checked" and req.criterion_id:
-        from app.models.ticket import Ticket
+    elif req.event_type == EventType.CRITERION_CHECKED and req.criterion_id:
         ticket_result = await db.execute(select(Ticket).where(Ticket.id == req.ticket_id))
         ticket = ticket_result.scalar_one_or_none()
         if ticket and ticket.acceptance_criteria:
-            criteria = list(ticket.acceptance_criteria)
+            # Deep copy required: shallow list() shares dict refs, so in-place
+            # mutation of c["done"] would also mutate the "committed" state
+            # SQLAlchemy cached, making the column appear unmodified.
+            criteria = [dict(c) for c in ticket.acceptance_criteria]
             for c in criteria:
                 if c.get("id") == req.criterion_id:
                     c["done"] = True
@@ -87,10 +98,19 @@ async def post_event(
             db.add(ticket)
 
     await db.commit()
+
+    if req.event_type in (EventType.DONE, EventType.LOG, EventType.ERROR):
+        from app.services.deviation_detector import check_post_event
+        deviations = await check_post_event(event, agent, db)
+        if deviations:
+            for dev in deviations:
+                db.add(dev)
+            await db.commit()
+
     return {"id": event.id}
 
 
-@router.get("/ticket/{ticket_id}")
+@router.get("/ticket/{ticket_id}", response_model=list[EventResponse])
 async def get_ticket_events(ticket_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(AgentEvent)
@@ -118,7 +138,7 @@ async def get_ticket_cost(ticket_id: str, db: AsyncSession = Depends(get_db)):
     )
 
 
-@router.get("/agent/{agent_id}")
+@router.get("/agent/{agent_id}", response_model=list[EventResponse])
 async def get_agent_events(
     agent_id: str,
     limit: int = 200,
@@ -133,7 +153,7 @@ async def get_agent_events(
     return result.scalars().all()
 
 
-@router.get("/")
+@router.get("/", response_model=list[EventResponse])
 async def list_workspace_events(
     workspace_id: str,
     limit: int = 100,
@@ -167,7 +187,6 @@ def _event_to_dict(event: AgentEvent) -> dict[str, Any]:
 @router.get("/stream")
 async def event_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
     async def generator():
-        # Bootstrap: send last 50 events so fresh page loads have context
         result = await db.execute(
             select(AgentEvent)
             .where(AgentEvent.workspace_id == workspace_id)
@@ -179,9 +198,18 @@ async def event_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
             yield {"data": json.dumps(_event_to_dict(event))}
 
         last_created = bootstrap[-1].created_at if bootstrap else None
+        tick = 0
 
         while True:
-            await asyncio.sleep(0.5)
+            try:
+                await asyncio.sleep(0.5)
+            except asyncio.CancelledError:
+                return
+
+            tick += 1
+            if tick % 30 == 0:
+                yield {"comment": "keepalive"}
+
             q = (
                 select(AgentEvent)
                 .where(AgentEvent.workspace_id == workspace_id)

@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from typing import Any
@@ -16,6 +17,9 @@ class TrecoClient:
             headers={"X-Agent-Key": self._api_key},
             timeout=10.0,
         )
+
+    async def heartbeat(self, ticket_id: str) -> None:
+        await self._emit(ticket_id, "heartbeat")
 
     async def start(self, ticket_id: str) -> None:
         await self._emit(ticket_id, "ticket_started")
@@ -60,16 +64,27 @@ class TrecoClient:
         response = await self._http.post("/api/events/", json=body)
         response.raise_for_status()
 
+    async def _heartbeat_loop(self, ticket_id: str) -> None:
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await self.heartbeat(ticket_id)
+            except Exception:
+                pass
+
     @asynccontextmanager
     async def track(self, ticket_id: str):
         """Context manager: auto start/done/error around agent work."""
         await self.start(ticket_id)
+        hb_task = asyncio.create_task(self._heartbeat_loop(ticket_id))
         try:
             yield self
             await self.done(ticket_id)
         except Exception as exc:
             await self.error(ticket_id, str(exc))
             raise
+        finally:
+            hb_task.cancel()
 
     async def close(self) -> None:
         await self._http.aclose()

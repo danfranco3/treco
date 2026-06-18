@@ -10,3 +10,6 @@ dist/
 .pytest_cache/
 .claude/worktrees/
 .gstack/
+backend/sdk/python/treco/_backend/
+backend/sdk/python/treco/_ui/
+frontend/out/

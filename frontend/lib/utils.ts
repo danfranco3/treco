@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { Ticket } from "./types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -23,4 +24,28 @@ export function formatTime(iso: string): string {
 export function criteriaProgress(criteria: { done: boolean }[]): number {
   if (!criteria.length) return 0;
   return Math.round((criteria.filter((c) => c.done).length / criteria.length) * 100);
+}
+
+export function toMap<T extends { id: string }>(items: T[]): Record<string, T> {
+  return Object.fromEntries(items.map((i) => [i.id, i]));
+}
+
+export function toNameMap(items: { id: string; name: string }[]): Record<string, string> {
+  return Object.fromEntries(items.map((i) => [i.id, i.name]));
+}
+
+export function sortChronological<T extends { created_at: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+}
+
+export function buildDefaultPrompt(ticket: Ticket): string {
+  const criteria = ticket.acceptance_criteria
+    .map((c) => `- [${c.done ? "x" : " "}] ${c.text}`)
+    .join("\n");
+  return (
+    `Implement ticket: ${ticket.title}\n\n` +
+    (ticket.description ? `${ticket.description}\n\n` : "") +
+    `Acceptance criteria:\n${criteria || "(none extracted — use your judgement)"}\n\n` +
+    "Run `treco check <criterion-id>` as you complete each criterion, then `treco done` when finished."
+  );
 }

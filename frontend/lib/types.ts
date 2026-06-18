@@ -6,6 +6,7 @@ export interface Criterion {
 
 export interface Ticket {
   id: string;
+  workspace_id: string | null;
   source: "jira" | "linear" | "asana" | "github" | "custom";
   source_id: string | null;
   title: string;
@@ -15,13 +16,27 @@ export interface Ticket {
   body: Record<string, unknown>;
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  repo_path: string | null;
+  created_at: string;
+}
+
 export interface Agent {
   id: string;
   name: string;
-  status: "idle" | "working" | "done" | "error";
+  status: "idle" | "working" | "awaiting_approval" | "done" | "error";
   current_ticket_id: string | null;
   workspace_id: string;
 }
+
+export type DeviationType =
+  | "stuck"
+  | "incomplete_criteria"
+  | "token_spike"
+  | "process_exited"
+  | "awaiting_approval";
 
 export type EventType =
   | "ticket_started"
@@ -30,7 +45,9 @@ export type EventType =
   | "pr_opened"
   | "done"
   | "error"
-  | "log";
+  | "log"
+  | "heartbeat"
+  | "deviation";
 
 export interface AgentEvent {
   id: string;
@@ -44,6 +61,22 @@ export interface AgentEvent {
   model: string | null;
   payload: Record<string, unknown>;
   created_at: string;
+}
+
+export interface DeviationPayload {
+  deviation_type?: string;
+  severity?: "warning" | "error";
+  message?: string;
+  context?: Record<string, unknown>;
+}
+
+export interface LogPayload {
+  message?: string;
+  url?: string;
+}
+
+export function getPayload<T>(event: AgentEvent): T {
+  return event.payload as T;
 }
 
 export interface CostSummary {

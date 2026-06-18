@@ -21,7 +21,7 @@ class AgentEvent(Base):
     ticket_id: Mapped[str] = mapped_column(String, index=True)
     workspace_id: Mapped[str] = mapped_column(String, index=True)
 
-    # ticket_started | criterion_checked | criterion_failed | pr_opened | done | error | log
+    # ticket_started | criterion_checked | criterion_failed | pr_opened | done | error | log | heartbeat | deviation
     event_type: Mapped[str] = mapped_column(String, index=True)
 
     # For criterion events

@@ -2,5 +2,6 @@
 from app.models.agent import Agent
 from app.models.event import AgentEvent
 from app.models.ticket import Ticket
+from app.models.workspace import Workspace
 
-__all__ = ["Agent", "AgentEvent", "Ticket"]
+__all__ = ["Agent", "AgentEvent", "Ticket", "Workspace"]
