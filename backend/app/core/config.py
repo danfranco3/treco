@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     # Base URL spawned agent subprocesses use to reach this backend
     backend_url: str = Field("http://localhost:8001", alias="BACKEND_URL")
 
+    # Frontend base URL — used for OAuth redirects
+    frontend_url: str = Field("http://localhost:3000", alias="FRONTEND_URL")
+
+    # GitHub OAuth
+    github_client_id: str | None = Field(None, alias="GITHUB_CLIENT_ID")
+    github_client_secret: str | None = Field(None, alias="GITHUB_CLIENT_SECRET")
+
     model_config = SettingsConfigDict(env_file=".env", populate_by_name=True)
 
 
