@@ -10,6 +10,9 @@ from httpx import ASGITransport, AsyncClient
 from app.core.database import Base, get_db
 from app.core.limiter import reset_limits
 from app.main import app
+from app.models.agent import Agent
+from app.models.ticket import Ticket
+from tests.shared import TestSessionLocal, engine
 
 
 @pytest.fixture(autouse=True)
@@ -17,11 +20,6 @@ def _reset_rate_limits():
     reset_limits()
     yield
     reset_limits()
-from app.models.agent import Agent
-from app.models.ticket import Ticket
-from app.models.user import User
-from app.services.auth import create_jwt
-from tests.shared import TestSessionLocal, engine
 
 
 async def override_get_db():
@@ -96,31 +94,3 @@ async def ticket():
         await db.commit()
         await db.refresh(t)
         return t
-
-
-@pytest_asyncio.fixture
-async def user_with_token():
-    async with TestSessionLocal() as db:
-        user = User(
-            id=str(uuid.uuid4()),
-            github_id=str(secrets.randbelow(10**9)),
-            login="test-user",
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-    token = create_jwt(user.id)
-    return user, token
-
-
-@pytest_asyncio.fixture
-async def authed_client(user_with_token):
-    """HTTP client with a valid JWT Authorization header. Yields (client, user)."""
-    user, token = user_with_token
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://test",
-        headers={"Authorization": f"Bearer {token}"},
-    ) as c:
-        yield c, user

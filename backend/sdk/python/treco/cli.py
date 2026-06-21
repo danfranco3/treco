@@ -114,7 +114,7 @@ async def post_event(cfg: dict, ticket_id: str, event_type: str, **kwargs) -> No
     body.setdefault("payload", {})
     async with httpx.AsyncClient(timeout=8.0) as client:
         r = await client.post(
-            f"{cfg['base_url']}/api/events/",
+            f"{cfg['base_url']}/api/events",
             json=body,
             headers={"X-Agent-Key": cfg["api_key"]},
         )
@@ -173,7 +173,7 @@ def cmd_init():
     workspace_id = input("Workspace ID [demo]: ").strip() or "demo"
 
     try:
-        httpx.get(f"{base_url}/api/tickets/?workspace_id={workspace_id}", timeout=2.0)
+        httpx.get(f"{base_url}/api/tickets?workspace_id={workspace_id}", timeout=2.0)
     except Exception:
         answer = input("Backend not reachable. Start it now? [Y/n]: ").strip().lower()
         if answer not in ("n", "no"):
@@ -230,7 +230,7 @@ def cmd_new(title: str = ""):
     workspace_id = _workspace_id()
     with httpx.Client(timeout=30.0) as client:
         r = client.post(
-            f"{cfg['base_url']}/api/tickets/",
+            f"{cfg['base_url']}/api/tickets",
             json={"workspace_id": workspace_id, "title": title, "description": description or None},
             headers={"X-Agent-Key": cfg["api_key"]},
         )
@@ -275,7 +275,7 @@ def _pick_ticket(cfg: dict) -> str:
     workspace_id = _workspace_id()
     with httpx.Client(timeout=8.0) as client:
         r = client.get(
-            f"{cfg['base_url']}/api/tickets/",
+            f"{cfg['base_url']}/api/tickets",
             params={"workspace_id": workspace_id},
             headers={"X-Agent-Key": cfg["api_key"]},
         )

@@ -16,11 +16,11 @@ class TestWorkspaceEventsEndpoint:
     async def test_returns_events_for_workspace(self, client, agent_with_key, ticket):
         agent, raw_key = agent_with_key
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "log", "payload": {"message": "hi"}},
             headers={"X-Agent-Key": raw_key},
         )
-        r = await client.get("/api/events/?workspace_id=ws1")
+        r = await client.get("/api/events?workspace_id=ws1")
         assert r.status_code == 200
         data = r.json()
         assert len(data) == 1
@@ -30,11 +30,11 @@ class TestWorkspaceEventsEndpoint:
     async def test_does_not_cross_workspaces(self, client, agent_with_key, ticket):
         _, raw_key = agent_with_key
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "log", "payload": {}},
             headers={"X-Agent-Key": raw_key},
         )
-        r = await client.get("/api/events/?workspace_id=other_workspace")
+        r = await client.get("/api/events?workspace_id=other_workspace")
         assert r.status_code == 200
         assert r.json() == []
 
@@ -43,11 +43,11 @@ class TestWorkspaceEventsEndpoint:
         _, raw_key = agent_with_key
         for _ in range(5):
             await client.post(
-                "/api/events/",
+                "/api/events",
                 json={"ticket_id": ticket.id, "event_type": "log", "payload": {}},
                 headers={"X-Agent-Key": raw_key},
             )
-        r = await client.get("/api/events/?workspace_id=ws1&limit=3")
+        r = await client.get("/api/events?workspace_id=ws1&limit=3")
         assert r.status_code == 200
         assert len(r.json()) == 3
 
@@ -57,7 +57,7 @@ class TestAgentEventsEndpoint:
     async def test_returns_events_for_agent(self, client, agent_with_key, ticket):
         agent, raw_key = agent_with_key
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "log", "payload": {"message": "step 1"}},
             headers={"X-Agent-Key": raw_key},
         )
@@ -100,7 +100,7 @@ class TestAssignTicketEndpoint:
         agent, raw_key = agent_with_key
         # Put agent into working state
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "ticket_started", "payload": {}},
             headers={"X-Agent-Key": raw_key},
         )
@@ -129,12 +129,12 @@ class TestTicketPagination:
                 ))
             await db.commit()
 
-        r = await client.get("/api/tickets/?workspace_id=ws1&limit=3&offset=0")
+        r = await client.get("/api/tickets?workspace_id=ws1&limit=3&offset=0")
         assert r.status_code == 200
         first_page = r.json()
         assert len(first_page) == 3
 
-        r2 = await client.get("/api/tickets/?workspace_id=ws1&limit=3&offset=3")
+        r2 = await client.get("/api/tickets?workspace_id=ws1&limit=3&offset=3")
         assert r2.status_code == 200
         second_page = r2.json()
         assert len(second_page) == 2
@@ -146,7 +146,7 @@ class TestTicketPagination:
 
     @pytest.mark.asyncio
     async def test_limit_capped_at_200(self, client):
-        r = await client.get("/api/tickets/?workspace_id=ws1&limit=999&offset=0")
+        r = await client.get("/api/tickets?workspace_id=ws1&limit=999&offset=0")
         assert r.status_code == 200  # doesn't crash, capped internally
 
 
@@ -157,7 +157,7 @@ class TestLastSeenAtUpdated:
         assert agent.last_seen_at is None
 
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "log", "payload": {}},
             headers={"X-Agent-Key": raw_key},
         )
@@ -171,7 +171,7 @@ class TestEventAuth:
     @pytest.mark.asyncio
     async def test_post_event_without_key_returns_422(self, client, ticket):
         r = await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "log", "payload": {}},
         )
         # Missing required header → 422 (FastAPI validates Header(...) as required)
@@ -180,7 +180,7 @@ class TestEventAuth:
     @pytest.mark.asyncio
     async def test_post_event_invalid_key_returns_401(self, client, ticket):
         r = await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "log", "payload": {}},
             headers={"X-Agent-Key": "treco_invalid_key_xyz"},
         )
@@ -189,17 +189,13 @@ class TestEventAuth:
 
 class TestImplementTicket:
     @pytest.mark.asyncio
-    async def test_implement_spawns_agent(self, authed_client, ticket):
-        from unittest.mock import AsyncMock, patch
-        client, user = authed_client
+    async def test_implement_spawns_agent(self, client, ticket):
+        from unittest.mock import patch
+        from app.models.workspace import Workspace
 
         async with TestSessionLocal() as db:
-            from app.models.workspace import Workspace
-            from app.models.user_workspace import UserWorkspace
             ws = Workspace(id="ws1", name="test-ws", repo_path="/tmp/repo")
             db.add(ws)
-            await db.flush()
-            db.add(UserWorkspace(user_id=user.id, workspace_id="ws1", role="member"))
             await db.commit()
 
         with patch("app.api.routes.tickets.agent_runner.mint_agent") as mock_mint, \
@@ -229,8 +225,7 @@ class TestImplementTicket:
         assert "agent_name" in data
 
     @pytest.mark.asyncio
-    async def test_implement_ticket_without_workspace_returns_400(self, authed_client):
-        client, _ = authed_client
+    async def test_implement_ticket_without_workspace_returns_400(self, client):
         async with TestSessionLocal() as db:
             t = Ticket(
                 id=str(uuid.uuid4()),
@@ -275,7 +270,7 @@ class TestImportTicketDedup:
         assert r1.json()["id"] == r2.json()["id"]
 
         # Only one ticket in DB
-        listing = await client.get("/api/tickets/?workspace_id=ws1")
+        listing = await client.get("/api/tickets?workspace_id=ws1")
         assert len(listing.json()) == 1
 
 

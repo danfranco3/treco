@@ -4,7 +4,6 @@ import os
 import signal
 import uuid
 from datetime import datetime
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, ConfigDict
@@ -16,9 +15,7 @@ from app.core.constants import AgentStatus, EventType
 from app.core.database import get_db, get_or_404
 from app.models.agent import Agent
 from app.models.event import AgentEvent
-from app.models.user import User
-from app.models.user_workspace import UserWorkspace
-from app.services.auth import check_workspace_member, generate_api_key, require_user, resolve_agent
+from app.services.auth import generate_api_key, resolve_agent
 
 router = APIRouter()
 
@@ -43,15 +40,8 @@ class CreateAgentResponse(AgentResponse):
 
 
 @router.post("", response_model=CreateAgentResponse)
-async def create_agent(
-    req: CreateAgentRequest,
-    current_user: Annotated[User, Depends(require_user)],
-    db: AsyncSession = Depends(get_db),
-):
-    await check_workspace_member(current_user.id, req.workspace_id, db)
-
+async def create_agent(req: CreateAgentRequest, db: AsyncSession = Depends(get_db)):
     raw_key, key_hash = generate_api_key()
-
     agent = Agent(
         id=str(uuid.uuid4()),
         workspace_id=req.workspace_id,
@@ -62,7 +52,6 @@ async def create_agent(
     db.add(agent)
     await db.commit()
     await db.refresh(agent)
-
     return CreateAgentResponse(
         id=agent.id,
         name=agent.name,
@@ -74,15 +63,8 @@ async def create_agent(
 
 
 @router.get("", response_model=list[AgentResponse])
-async def list_agents(
-    workspace_id: str,
-    current_user: Annotated[User, Depends(require_user)],
-    db: AsyncSession = Depends(get_db),
-):
-    await check_workspace_member(current_user.id, workspace_id, db)
-    result = await db.execute(
-        select(Agent).where(Agent.workspace_id == workspace_id)
-    )
+async def list_agents(workspace_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Agent).where(Agent.workspace_id == workspace_id))
     return result.scalars().all()
 
 
@@ -95,13 +77,7 @@ async def get_me(
 
 
 @router.get("/stream")
-async def agent_stream(
-    workspace_id: str,
-    current_user: Annotated[User, Depends(require_user)],
-    db: AsyncSession = Depends(get_db),
-):
-    await check_workspace_member(current_user.id, workspace_id, db)
-
+async def agent_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
     async def generator():
         last_snapshot: dict[str, str] = {}
         tick = 0

@@ -1,6 +1,6 @@
 import re
 import uuid
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -9,12 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, get_or_404
 from app.models.ticket import Ticket
-from app.models.user import User
 from app.models.workspace import Workspace
 from app.services import agent_runner
 from app.services.adapters import ADAPTERS
 from app.services.adapters.base import NormalizedTicket
-from app.services.auth import check_workspace_member, require_user
 from app.services.criteria_extractor import create_criterion, extract_criteria
 
 router = APIRouter()
@@ -78,6 +76,16 @@ class BulkImportRequest(BaseModel):
         return v
 
 
+class FetchUrlRequest(BaseModel):
+    workspace_id: str
+    url: str
+
+    @field_validator("workspace_id")
+    @classmethod
+    def validate_workspace_id(cls, v: str) -> str:
+        return _require_workspace_id(v)
+
+
 class TicketResponse(BaseModel):
     id: str
     workspace_id: str | None
@@ -90,6 +98,34 @@ class TicketResponse(BaseModel):
     body: dict
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ImplementTicketRequest(BaseModel):
+    prompt: str
+    agent_name: str | None = None
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("prompt is required")
+        return v
+
+
+class ImplementTicketResponse(BaseModel):
+    agent_id: str
+    agent_name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AssignTicketWorkspaceRequest(BaseModel):
+    workspace_id: str | None = None
+
+
+_GITHUB_ISSUE_RE = re.compile(
+    r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/(\d+)"
+)
 
 
 async def _upsert_ticket(db: AsyncSession, workspace_id: str, norm: NormalizedTicket) -> Ticket:
@@ -129,98 +165,43 @@ async def _upsert_ticket(db: AsyncSession, workspace_id: str, norm: NormalizedTi
 
 
 @router.post("/import", response_model=TicketResponse)
-async def import_ticket(
-    req: ImportTicketRequest,
-    current_user: Annotated[User, Depends(require_user)],
-    db: AsyncSession = Depends(get_db),
-):
-    await check_workspace_member(current_user.id, req.workspace_id, db)
+async def import_ticket(req: ImportTicketRequest, db: AsyncSession = Depends(get_db)):
     adapter = ADAPTERS.get(req.source)
     if not adapter:
         raise HTTPException(status_code=400, detail=f"Unsupported source: {req.source}")
-
     normalized = adapter.normalize(req.raw)
     return await _upsert_ticket(db, req.workspace_id, normalized)
 
 
 @router.post("/fetch/github", response_model=TicketResponse)
-async def fetch_github_issue(
-    req: FetchGitHubIssueRequest,
-    current_user: Annotated[User, Depends(require_user)],
-    db: AsyncSession = Depends(get_db),
-):
-    await check_workspace_member(current_user.id, req.workspace_id, db)
+async def fetch_github_issue(req: FetchGitHubIssueRequest, db: AsyncSession = Depends(get_db)):
     adapter = ADAPTERS["github"]
     normalized = await adapter.fetch_issue(req.repo, req.issue_number, req.token)
     return await _upsert_ticket(db, req.workspace_id, normalized)
 
 
 @router.post("/fetch/linear", response_model=TicketResponse)
-async def fetch_linear_issue(
-    req: FetchLinearIssueRequest,
-    current_user: Annotated[User, Depends(require_user)],
-    db: AsyncSession = Depends(get_db),
-):
-    await check_workspace_member(current_user.id, req.workspace_id, db)
+async def fetch_linear_issue(req: FetchLinearIssueRequest, db: AsyncSession = Depends(get_db)):
     adapter = ADAPTERS["linear"]
     normalized = await adapter.fetch_issue(req.issue_id, req.api_key)
     return await _upsert_ticket(db, req.workspace_id, normalized)
 
 
-async def _bulk_import_github(req: BulkImportRequest, db: AsyncSession) -> list[Ticket]:
-    if not req.repo:
-        raise HTTPException(status_code=400, detail="repo is required for GitHub bulk import")
-    adapter = ADAPTERS["github"]
-    normalized_list = await adapter.fetch_issues(req.repo, req.token, req.limit)
-    tickets: list[Ticket] = []
-    for norm in normalized_list:
-        tickets.append(await _upsert_ticket(db, req.workspace_id, norm))
-    return tickets
-
-
-async def _bulk_import_linear(req: BulkImportRequest, db: AsyncSession) -> list[Ticket]:
-    adapter = ADAPTERS["linear"]
-    normalized_list = await adapter.fetch_issues(req.team_key, req.token, req.limit)
-    tickets: list[Ticket] = []
-    for norm in normalized_list:
-        tickets.append(await _upsert_ticket(db, req.workspace_id, norm))
-    return tickets
-
-
 @router.post("/fetch/bulk", response_model=list[TicketResponse])
-async def bulk_import(
-    req: BulkImportRequest,
-    current_user: Annotated[User, Depends(require_user)],
-    db: AsyncSession = Depends(get_db),
-):
-    await check_workspace_member(current_user.id, req.workspace_id, db)
+async def bulk_import(req: BulkImportRequest, db: AsyncSession = Depends(get_db)):
     if req.source == "github":
-        return await _bulk_import_github(req, db)
-    return await _bulk_import_linear(req, db)
-
-
-class FetchUrlRequest(BaseModel):
-    workspace_id: str
-    url: str
-
-    @field_validator("workspace_id")
-    @classmethod
-    def validate_workspace_id(cls, v: str) -> str:
-        return _require_workspace_id(v)
-
-
-_GITHUB_ISSUE_RE = re.compile(
-    r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/(\d+)"
-)
+        if not req.repo:
+            raise HTTPException(status_code=400, detail="repo is required for GitHub bulk import")
+        adapter = ADAPTERS["github"]
+        normalized_list = await adapter.fetch_issues(req.repo, req.token, req.limit)
+    else:
+        adapter = ADAPTERS["linear"]
+        normalized_list = await adapter.fetch_issues(req.team_key, req.token, req.limit)
+    return [await _upsert_ticket(db, req.workspace_id, n) for n in normalized_list]
 
 
 @router.post("/fetch/url", response_model=TicketResponse)
-async def fetch_url(
-    req: FetchUrlRequest,
-    current_user: Annotated[User, Depends(require_user)],
-    db: AsyncSession = Depends(get_db),
-):
-    await check_workspace_member(current_user.id, req.workspace_id, db)
+async def fetch_url(req: FetchUrlRequest, db: AsyncSession = Depends(get_db)):
     m = _GITHUB_ISSUE_RE.match(req.url.strip())
     if m:
         owner, repo, issue_number = m.groups()
@@ -229,19 +210,15 @@ async def fetch_url(
         return await _upsert_ticket(db, req.workspace_id, normalized)
     raise HTTPException(
         status_code=400,
-        detail="Unsupported URL. Only public GitHub issue URLs are supported (https://github.com/owner/repo/issues/N).",
+        detail="Unsupported URL. Only public GitHub issue URLs are supported.",
     )
 
 
 @router.post("", response_model=TicketResponse)
-async def create_ticket(
-    req: CreateTicketRequest,
-    db: AsyncSession = Depends(get_db),
-):
+async def create_ticket(req: CreateTicketRequest, db: AsyncSession = Depends(get_db)):
     criteria = [create_criterion(c) for c in req.acceptance_criteria]
     if not criteria and req.description:
         criteria = await extract_criteria(req.title, req.description)
-
     ticket = Ticket(
         id=str(uuid.uuid4()),
         workspace_id=req.workspace_id,
@@ -264,41 +241,18 @@ async def get_ticket(ticket_id: str, db: AsyncSession = Depends(get_db)):
     return await get_or_404(db, Ticket, ticket_id)
 
 
-class ImplementTicketRequest(BaseModel):
-    prompt: str
-    agent_name: str | None = None
-
-    @field_validator("prompt")
-    @classmethod
-    def validate_prompt(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("prompt is required")
-        return v
-
-
-class ImplementTicketResponse(BaseModel):
-    agent_id: str
-    agent_name: str
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 @router.post("/{ticket_id}/implement", response_model=ImplementTicketResponse)
 async def implement_ticket(
     ticket_id: str,
     req: ImplementTicketRequest,
-    current_user: Annotated[User, Depends(require_user)],
     db: AsyncSession = Depends(get_db),
 ):
     ticket = await get_or_404(db, Ticket, ticket_id)
     if not ticket.workspace_id:
         raise HTTPException(status_code=400, detail="Assign this ticket to a workspace first")
-    await check_workspace_member(current_user.id, ticket.workspace_id, db)
-
-    workspace = await get_or_404(db, Workspace, ticket.workspace_id, "This ticket's workspace has no repo path configured")
+    workspace = await get_or_404(db, Workspace, ticket.workspace_id)
     if not workspace.repo_path:
-        raise HTTPException(status_code=400, detail="This ticket's workspace has no repo path configured")
-
+        raise HTTPException(status_code=400, detail="Workspace has no repo path configured")
     agent_name = req.agent_name or f"agent-{ticket.title[:24]}"
     agent, raw_key = await agent_runner.mint_agent(
         workspace_id=ticket.workspace_id,
@@ -309,23 +263,15 @@ async def implement_ticket(
     return ImplementTicketResponse(agent_id=agent.id, agent_name=agent.name)
 
 
-class AssignTicketWorkspaceRequest(BaseModel):
-    workspace_id: str | None = None
-
-
 @router.patch("/{ticket_id}/workspace", response_model=TicketResponse)
 async def assign_ticket_workspace(
     ticket_id: str,
     req: AssignTicketWorkspaceRequest,
-    current_user: Annotated[User, Depends(require_user)],
     db: AsyncSession = Depends(get_db),
 ):
     ticket = await get_or_404(db, Ticket, ticket_id)
-
     if req.workspace_id is not None:
         await get_or_404(db, Workspace, req.workspace_id)
-        await check_workspace_member(current_user.id, req.workspace_id, db)
-
     ticket.workspace_id = req.workspace_id
     await db.commit()
     await db.refresh(ticket)

@@ -1,4 +1,3 @@
-import { AuthGuard } from "@/components/layout/AuthGuard";
 import { WorkspaceProvider } from "@/lib/workspace";
 import { StreamProvider } from "@/lib/StreamProvider";
 import { AppShell } from "@/components/layout/AppShell";
@@ -6,7 +5,7 @@ import { CommandPaletteProvider } from "@/components/ui/CommandPaletteProvider";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <AuthGuard>
+    <>
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[9999] focus:px-4 focus:py-2 focus:bg-white focus:text-[#166534] focus:rounded-lg focus:shadow-lg focus:border focus:border-[#16a34a] focus:font-medium focus:text-sm"
@@ -19,6 +18,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <AppShell>{children}</AppShell>
         </StreamProvider>
       </WorkspaceProvider>
-    </AuthGuard>
+    </>
   );
 }

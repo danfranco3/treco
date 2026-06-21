@@ -13,7 +13,7 @@ class TestPostEvent:
     async def test_post_log_event_returns_id(self, client, agent_with_key, ticket):
         _, raw_key = agent_with_key
         r = await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "log", "payload": {"message": "step"}},
             headers={"X-Agent-Key": raw_key},
         )
@@ -24,7 +24,7 @@ class TestPostEvent:
     async def test_post_unknown_event_type_returns_422(self, client, agent_with_key, ticket):
         _, raw_key = agent_with_key
         r = await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "unknown_type", "payload": {}},
             headers={"X-Agent-Key": raw_key},
         )
@@ -42,14 +42,14 @@ class TestPostEvent:
             payload: dict = {"ticket_id": ticket.id, "event_type": et, "payload": {}}
             if et in ("criterion_checked", "criterion_failed") and criterion_id:
                 payload["criterion_id"] = criterion_id
-            r = await client.post("/api/events/", json=payload, headers={"X-Agent-Key": raw_key})
+            r = await client.post("/api/events", json=payload, headers={"X-Agent-Key": raw_key})
             assert r.status_code == 200, f"event_type={et} failed: {r.text}"
 
     @pytest.mark.asyncio
     async def test_ticket_started_sets_agent_working(self, client, agent_with_key, ticket):
         agent, raw_key = agent_with_key
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "ticket_started", "payload": {}},
             headers={"X-Agent-Key": raw_key},
         )
@@ -62,12 +62,12 @@ class TestPostEvent:
     async def test_done_event_sets_agent_idle(self, client, agent_with_key, ticket):
         agent, raw_key = agent_with_key
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "ticket_started", "payload": {}},
             headers={"X-Agent-Key": raw_key},
         )
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "done", "payload": {}},
             headers={"X-Agent-Key": raw_key},
         )
@@ -80,7 +80,7 @@ class TestPostEvent:
     async def test_error_event_sets_agent_error(self, client, agent_with_key, ticket):
         agent, raw_key = agent_with_key
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "error", "payload": {"message": "boom"}},
             headers={"X-Agent-Key": raw_key},
         )
@@ -94,7 +94,7 @@ class TestPostEvent:
         criterion_id = ticket.acceptance_criteria[0]["id"]
 
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={
                 "ticket_id": ticket.id,
                 "event_type": "criterion_checked",
@@ -113,7 +113,7 @@ class TestPostEvent:
     async def test_token_counts_stored(self, client, agent_with_key, ticket):
         _, raw_key = agent_with_key
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={
                 "ticket_id": ticket.id,
                 "event_type": "log",
@@ -137,7 +137,7 @@ class TestGetTicketEvents:
         _, raw_key = agent_with_key
         for msg in ["first", "second", "third"]:
             await client.post(
-                "/api/events/",
+                "/api/events",
                 json={"ticket_id": ticket.id, "event_type": "log", "payload": {"message": msg}},
                 headers={"X-Agent-Key": raw_key},
             )
@@ -161,7 +161,7 @@ class TestCostEndpoint:
         _, raw_key = agent_with_key
         for tokens_in, tokens_out in [(100, 50), (200, 100), (300, 150)]:
             await client.post(
-                "/api/events/",
+                "/api/events",
                 json={
                     "ticket_id": ticket.id,
                     "event_type": "log",
@@ -201,7 +201,7 @@ class TestAgentEventsEndpoint:
         agent, raw_key = agent_with_key
         for i in range(3):
             await client.post(
-                "/api/events/",
+                "/api/events",
                 json={"ticket_id": ticket.id, "event_type": "log", "payload": {"seq": i}},
                 headers={"X-Agent-Key": raw_key},
             )
@@ -214,5 +214,5 @@ class TestAgentEventsEndpoint:
 class TestWorkspaceEventsLimitCap:
     @pytest.mark.asyncio
     async def test_workspace_events_capped_at_500(self, client, agent_with_key, ticket):
-        r = await client.get("/api/events/?workspace_id=ws1&limit=9999")
+        r = await client.get("/api/events?workspace_id=ws1&limit=9999")
         assert r.status_code == 200

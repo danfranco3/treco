@@ -47,7 +47,7 @@ async def agent_pair():
 class TestCreateAgent:
     @pytest.mark.asyncio
     async def test_create_returns_api_key(self, client):
-        r = await client.post("/api/agents/", json={"workspace_id": "ws1", "name": "my-agent"})
+        r = await client.post("/api/agents", json={"workspace_id": "ws1", "name": "my-agent"})
         assert r.status_code == 200
         data = r.json()
         assert "api_key" in data
@@ -55,7 +55,7 @@ class TestCreateAgent:
 
     @pytest.mark.asyncio
     async def test_create_response_fields(self, client):
-        r = await client.post("/api/agents/", json={"workspace_id": "ws1", "name": "my-agent"})
+        r = await client.post("/api/agents", json={"workspace_id": "ws1", "name": "my-agent"})
         data = r.json()
         assert data["name"] == "my-agent"
         assert data["workspace_id"] == "ws1"
@@ -65,7 +65,7 @@ class TestCreateAgent:
 
     @pytest.mark.asyncio
     async def test_api_key_not_stored_raw(self, client):
-        r = await client.post("/api/agents/", json={"workspace_id": "ws1", "name": "check-hash"})
+        r = await client.post("/api/agents", json={"workspace_id": "ws1", "name": "check-hash"})
         agent_id = r.json()["id"]
         api_key = r.json()["api_key"]
 
@@ -77,12 +77,12 @@ class TestCreateAgent:
 
     @pytest.mark.asyncio
     async def test_missing_workspace_id_returns_422(self, client):
-        r = await client.post("/api/agents/", json={"name": "no-ws"})
+        r = await client.post("/api/agents", json={"name": "no-ws"})
         assert r.status_code == 422
 
     @pytest.mark.asyncio
     async def test_missing_name_returns_422(self, client):
-        r = await client.post("/api/agents/", json={"workspace_id": "ws1"})
+        r = await client.post("/api/agents", json={"workspace_id": "ws1"})
         assert r.status_code == 422
 
 
@@ -90,7 +90,7 @@ class TestListAgents:
     @pytest.mark.asyncio
     async def test_list_returns_workspace_agents(self, client, agent_pair):
         ws1_agents, _ = agent_pair
-        r = await client.get("/api/agents/?workspace_id=ws1")
+        r = await client.get("/api/agents?workspace_id=ws1")
         assert r.status_code == 200
         data = r.json()
         assert len(data) == 2
@@ -99,7 +99,7 @@ class TestListAgents:
 
     @pytest.mark.asyncio
     async def test_list_isolated_by_workspace(self, client, agent_pair):
-        r = await client.get("/api/agents/?workspace_id=ws2")
+        r = await client.get("/api/agents?workspace_id=ws2")
         assert r.status_code == 200
         data = r.json()
         assert len(data) == 1
@@ -107,13 +107,13 @@ class TestListAgents:
 
     @pytest.mark.asyncio
     async def test_list_empty_workspace_returns_empty(self, client):
-        r = await client.get("/api/agents/?workspace_id=nonexistent_ws")
+        r = await client.get("/api/agents?workspace_id=nonexistent_ws")
         assert r.status_code == 200
         assert r.json() == []
 
     @pytest.mark.asyncio
     async def test_list_missing_workspace_id_returns_422(self, client):
-        r = await client.get("/api/agents/")
+        r = await client.get("/api/agents")
         assert r.status_code == 422
 
 
@@ -156,7 +156,7 @@ class TestCancelAgent:
         agent, raw_key = agent_with_key
         # Put agent in working state
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "ticket_started", "payload": {}},
             headers={"X-Agent-Key": raw_key},
         )
@@ -171,7 +171,7 @@ class TestCancelAgent:
     async def test_cancel_emits_error_event(self, client, agent_with_key, ticket):
         agent, raw_key = agent_with_key
         await client.post(
-            "/api/events/",
+            "/api/events",
             json={"ticket_id": ticket.id, "event_type": "ticket_started", "payload": {}},
             headers={"X-Agent-Key": raw_key},
         )
