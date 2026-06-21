@@ -2,13 +2,16 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 
-from fastapi import HTTPException
+from fastapi import Depends, Header, HTTPException
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.database import get_db
 from app.models.agent import Agent
+from app.models.user import User
+from app.models.user_workspace import UserWorkspace
 
 
 def generate_api_key() -> tuple[str, str]:
@@ -45,3 +48,34 @@ def decode_jwt(token: str) -> str:
         return user_id
     except (JWTError, KeyError):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+async def require_user(
+    authorization: str = Header(...),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer token required")
+    user_id = decode_jwt(authorization.removeprefix("Bearer "))
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+async def check_workspace_member(
+    user_id: str,
+    workspace_id: str,
+    db: AsyncSession,
+) -> UserWorkspace:
+    """Returns membership row or raises 403 if user is not a member."""
+    result = await db.execute(
+        select(UserWorkspace).where(
+            UserWorkspace.user_id == user_id,
+            UserWorkspace.workspace_id == workspace_id,
+        )
+    )
+    membership = result.scalar_one_or_none()
+    if membership is None:
+        raise HTTPException(status_code=403, detail="Not a member of this workspace")
+    return membership

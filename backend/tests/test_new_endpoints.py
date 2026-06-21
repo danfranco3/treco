@@ -189,13 +189,17 @@ class TestEventAuth:
 
 class TestImplementTicket:
     @pytest.mark.asyncio
-    async def test_implement_spawns_agent(self, client, ticket):
+    async def test_implement_spawns_agent(self, authed_client, ticket):
         from unittest.mock import AsyncMock, patch
+        client, user = authed_client
 
         async with TestSessionLocal() as db:
             from app.models.workspace import Workspace
+            from app.models.user_workspace import UserWorkspace
             ws = Workspace(id="ws1", name="test-ws", repo_path="/tmp/repo")
             db.add(ws)
+            await db.flush()
+            db.add(UserWorkspace(user_id=user.id, workspace_id="ws1", role="member"))
             await db.commit()
 
         with patch("app.api.routes.tickets.agent_runner.mint_agent") as mock_mint, \
@@ -225,7 +229,8 @@ class TestImplementTicket:
         assert "agent_name" in data
 
     @pytest.mark.asyncio
-    async def test_implement_ticket_without_workspace_returns_400(self, client):
+    async def test_implement_ticket_without_workspace_returns_400(self, authed_client):
+        client, _ = authed_client
         async with TestSessionLocal() as db:
             t = Ticket(
                 id=str(uuid.uuid4()),
