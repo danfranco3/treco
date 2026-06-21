@@ -2,8 +2,8 @@ import { cn } from "@/lib/utils";
 
 const STATUS_STYLES: Record<string, string> = {
   idle:        "bg-stone-100 text-stone-500 border-stone-200",
-  working:     "bg-[var(--green-3)] text-[var(--green)] border-[var(--green)]/25",
-  done:        "bg-[var(--green-3)] text-[var(--green-2)] border-[var(--green)]/25",
+  working:     "bg-[var(--green-3)] text-[var(--green-badge-text)] border-[var(--green)]/25",
+  done:        "bg-[var(--green-3)] text-[var(--green-badge-text)] border-[var(--green)]/25",
   error:       "bg-red-50 text-red-600 border-red-200",
   open:        "bg-amber-50 text-amber-600 border-amber-200",
   in_progress: "bg-blue-50 text-blue-600 border-blue-200",

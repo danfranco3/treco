@@ -11,11 +11,11 @@ export function PulseRing({ active, error, size = "md" }: PulseRingProps) {
   const color = error ? "bg-red-500" : "bg-[var(--green)]";
 
   if (!active && !error) {
-    return <span className={cn("inline-flex rounded-full bg-stone-300", dim)} />;
+    return <span aria-hidden="true" className={cn("inline-flex rounded-full bg-stone-300", dim)} />;
   }
 
   return (
-    <span className={cn("relative inline-flex", dim)}>
+    <span aria-hidden="true" className={cn("relative inline-flex", dim)}>
       {active && !error && (
         <span
           className={cn(

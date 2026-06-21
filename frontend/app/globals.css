@@ -17,7 +17,10 @@
   /* Text — stone scale */
   --text:   #1c1917;
   --text-2: #57534e;
-  --text-3: #a8a29e;
+  --text-3: #78716c; /* stone-500, 4.5:1 on white — was #a8a29e (2.5:1, failed WCAG AA) */
+
+  /* Badge/active-nav text on light-green backgrounds — green-800, 6.7:1 on white, 6.6:1 on --green-3 */
+  --green-badge-text: #166534;
 
   /* Accents */
   --green:  #16a34a;

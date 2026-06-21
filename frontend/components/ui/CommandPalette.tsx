@@ -105,11 +105,14 @@ export function CommandPalette({ tickets = [] }: CommandPaletteProps) {
     }
   };
 
+  const activeId = filtered[cursor] ? `cmd-opt-${filtered[cursor].id}` : undefined;
+
   return (
     <dialog
       ref={dialogRef}
       onClick={(e) => { if (e.target === dialogRef.current) close(); }}
       onCancel={close}
+      aria-label="Command palette"
       className={cn(
         "fixed inset-0 m-auto w-full max-w-lg rounded-xl p-0 overflow-hidden",
         "bg-[var(--surface)] border border-[var(--border)]",
@@ -120,25 +123,34 @@ export function CommandPalette({ tickets = [] }: CommandPaletteProps) {
       style={{ zIndex: "var(--z-modal)" }}
     >
       <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)]">
-        <span className="text-[var(--text-3)] text-sm select-none">⌕</span>
+        <span aria-hidden="true" className="text-[var(--text-3)] text-sm select-none">⌕</span>
         <input
           ref={inputRef}
+          role="combobox"
+          aria-label="Search commands and tickets"
+          aria-expanded={filtered.length > 0}
+          aria-controls="cmd-palette-list"
+          aria-activedescendant={activeId}
+          aria-autocomplete="list"
           value={query}
           onChange={(e) => { setQuery(e.target.value); setCursor(0); }}
           onKeyDown={onKey}
           placeholder="Search tickets, navigate..."
-          className="flex-1 bg-transparent text-sm font-mono text-[var(--text)] placeholder:text-[var(--text-3)] outline-none"
+          className="flex-1 bg-transparent text-sm font-mono text-[var(--text)] placeholder:text-[var(--text-3)] outline-none focus-visible:outline-none"
         />
         <kbd className="text-[var(--text-3)] text-xs border border-[var(--border)] rounded px-1 py-0.5 font-mono">Esc</kbd>
       </div>
 
-      <ul className="max-h-80 overflow-y-auto py-1">
+      <ul id="cmd-palette-list" role="listbox" aria-label="Results" className="max-h-80 overflow-y-auto py-1">
         {filtered.length === 0 && (
-          <li className="px-4 py-3 text-xs text-[var(--text-3)]">No results</li>
+          <li role="option" aria-selected={false} className="px-4 py-3 text-xs text-[var(--text-3)]">No results</li>
         )}
         {filtered.map((cmd, i) => (
           <li
             key={cmd.id}
+            id={`cmd-opt-${cmd.id}`}
+            role="option"
+            aria-selected={i === cursor}
             onMouseEnter={() => setCursor(i)}
             onClick={() => pick(cmd)}
             className={cn(

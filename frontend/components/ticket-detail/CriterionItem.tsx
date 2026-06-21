@@ -19,7 +19,7 @@ export function CriterionItem({ criterion, agentName, checkedAt, failedAt }: Cri
       failed && "bg-red-brand/5 border-red-brand/20",
       !done && !failed && "bg-surface-2 border-border-default"
     )}>
-      <div className="mt-0.5 flex-shrink-0">
+      <div className="mt-0.5 flex-shrink-0" aria-hidden="true">
         {done ? (
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-brand/20 text-green-brand text-xs">✓</span>
         ) : failed ? (
@@ -28,6 +28,7 @@ export function CriterionItem({ criterion, agentName, checkedAt, failedAt }: Cri
           <span className="flex h-5 w-5 items-center justify-center rounded-full border border-border-default text-text-muted text-xs">○</span>
         )}
       </div>
+      <span className="sr-only">{done ? "Completed" : failed ? "Failed" : "Pending"}:</span>
 
       <div className="flex-1 min-w-0">
         <p className={cn("text-sm", done ? "text-text-muted line-through" : "text-text-primary")}>

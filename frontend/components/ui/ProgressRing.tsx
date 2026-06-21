@@ -15,8 +15,13 @@ export function ProgressRing({ pct, size = 128, strokeWidth = 8, label }: Progre
   const color = pct === 100 ? "#10b981" : pct > 50 ? "#06b6d4" : "#f59e0b";
 
   return (
-    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox="0 0 120 120" fill="none" className="-rotate-90">
+    <div
+      role="img"
+      aria-label={`${pct}% complete${label ? `: ${label}` : ""}`}
+      className="relative inline-flex items-center justify-center"
+      style={{ width: size, height: size }}
+    >
+      <svg aria-hidden="true" width={size} height={size} viewBox="0 0 120 120" fill="none" className="-rotate-90">
         <circle cx="60" cy="60" r={R} stroke="#1f2937" strokeWidth={strokeWidth} />
         <circle
           cx="60"

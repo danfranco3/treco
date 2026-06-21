@@ -29,7 +29,7 @@ export function StatBar({ agents, tickets, events }: StatBarProps) {
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       {stats.map((s) => (
         <div key={s.label} className="flex items-center gap-3 bg-white border border-[var(--border)] rounded-xl px-4 py-3 shadow-card">
-          <div className="w-8 h-8 rounded-lg bg-[var(--green-3)] flex items-center justify-center flex-shrink-0">
+          <div aria-hidden="true" className="w-8 h-8 rounded-lg bg-[var(--green-3)] flex items-center justify-center flex-shrink-0">
             <s.Icon className="w-4 h-4 text-[var(--green)]" />
           </div>
           <div>

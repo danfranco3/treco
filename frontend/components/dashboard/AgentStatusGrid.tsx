@@ -30,15 +30,16 @@ export function AgentStatusGrid({ agents, tickets, events = [] }: AgentStatusGri
   }
 
   return (
-    <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+    <ul role="list" className="grid grid-cols-2 xl:grid-cols-3 gap-3">
       {agents.map((agent) => (
-        <AgentMiniCard
-          key={agent.id}
-          agent={agent}
-          ticket={agent.current_ticket_id ? ticketMap[agent.current_ticket_id] : undefined}
-          deviation={latestDeviationByAgent.get(agent.id)}
-        />
+        <li key={agent.id}>
+          <AgentMiniCard
+            agent={agent}
+            ticket={agent.current_ticket_id ? ticketMap[agent.current_ticket_id] : undefined}
+            deviation={latestDeviationByAgent.get(agent.id)}
+          />
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }

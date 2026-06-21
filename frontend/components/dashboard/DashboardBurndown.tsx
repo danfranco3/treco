@@ -48,6 +48,7 @@ export function DashboardBurndown({ events }: DashboardBurndownProps) {
   }
 
   return (
+    <div role="img" aria-label={`Criteria burndown chart — ${data[data.length - 1]?.completed ?? 0} criteria completed`}>
     <ResponsiveContainer width="100%" height={160}>
       <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
@@ -68,5 +69,6 @@ export function DashboardBurndown({ events }: DashboardBurndownProps) {
         />
       </LineChart>
     </ResponsiveContainer>
+    </div>
   );
 }

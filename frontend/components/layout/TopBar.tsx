@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { Zap, LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { useWorkspace } from "@/lib/workspace";
 import { useAgents } from "@/lib/hooks";
 import { fetchCurrentUser } from "@/lib/api";
@@ -32,12 +32,16 @@ export function TopBar() {
     <header className="h-14 flex items-center justify-between px-6 border-b border-[var(--border)] bg-white flex-shrink-0">
       <div className="flex items-center gap-3">
         {working > 0 && (
-          <div className="flex items-center gap-1.5 text-xs bg-[var(--green-3)] border border-[var(--green)]/25 text-[var(--green)] px-2.5 py-1 rounded-full font-medium">
-            <span className="relative flex h-1.5 w-1.5">
+          <div
+            aria-live="polite"
+            aria-label={`${working} agent${working !== 1 ? "s" : ""} working`}
+            className="flex items-center gap-1.5 text-xs bg-[var(--green-3)] border border-[var(--green)]/25 text-[var(--green-badge-text)] px-2.5 py-1 rounded-full font-medium"
+          >
+            <span aria-hidden="true" className="relative flex h-1.5 w-1.5">
               <span className="ping-slow absolute inline-flex h-full w-full rounded-full bg-[var(--green)] opacity-75" />
               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[var(--green)]" />
             </span>
-            {working} agent{working !== 1 ? "s" : ""} working
+            <span aria-hidden="true">{working} agent{working !== 1 ? "s" : ""} working</span>
           </div>
         )}
       </div>
@@ -53,17 +57,17 @@ export function TopBar() {
                 className="w-7 h-7 rounded-full border border-[var(--border)]"
               />
             ) : (
-              <div className="w-7 h-7 rounded-full bg-[var(--green-3)] flex items-center justify-center text-xs font-medium text-[var(--green)]">
+              <div aria-hidden="true" className="w-7 h-7 rounded-full bg-[var(--green-3)] flex items-center justify-center text-xs font-medium text-[var(--green-badge-text)]">
                 {user.login[0].toUpperCase()}
               </div>
             )}
             <span className="text-sm text-[var(--text-2)] hidden sm:block">{user.login}</span>
             <button
               onClick={handleLogout}
+              aria-label="Sign out"
               className="p-1.5 rounded-md text-[var(--text-3)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors"
-              title="Sign out"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut aria-hidden="true" className="w-4 h-4" />
             </button>
           </div>
         )}

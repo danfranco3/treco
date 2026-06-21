@@ -47,8 +47,9 @@ export function AgentMiniCard({ agent, ticket, deviation }: AgentMiniCardProps) 
             <span
               className="text-amber-500 text-xs font-medium flex items-center gap-1"
               title={deviationPayload?.message}
+              aria-label={`Warning: ${deviationLabel}${deviationPayload?.message ? ` — ${deviationPayload.message}` : ""}`}
             >
-              ⚠ {deviationLabel}
+              <span aria-hidden="true">⚠</span> {deviationLabel}
             </span>
           )}
         </div>
@@ -56,12 +57,24 @@ export function AgentMiniCard({ agent, ticket, deviation }: AgentMiniCardProps) 
       </div>
 
       {ticket && isWorking && (
-        <Link href={`/tickets/${ticket.id}`} className="mt-3 block group">
+        <Link
+          href={`/tickets/${ticket.id}`}
+          aria-label={`View ticket: ${ticket.title}`}
+          className="mt-3 block group"
+        >
           <p className="text-xs text-text-muted group-hover:text-green-brand transition-colors truncate">
             {ticket.title}
           </p>
-          <div className="mt-1.5 h-1 bg-surface-2 rounded-full overflow-hidden">
+          <div
+            role="progressbar"
+            aria-valuenow={criteriaProgress(ticket.acceptance_criteria)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Criteria completion"
+            className="mt-1.5 h-1 bg-surface-2 rounded-full overflow-hidden"
+          >
             <div
+              aria-hidden="true"
               className="h-full bg-green-brand/60 rounded-full transition-all duration-500"
               style={{ width: `${criteriaProgress(ticket.acceptance_criteria)}%` }}
             />
