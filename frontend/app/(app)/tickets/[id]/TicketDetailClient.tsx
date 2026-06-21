@@ -12,6 +12,8 @@ import { TicketEventLog } from "@/components/ticket-detail/TicketEventLog";
 import { CostPanel } from "@/components/ticket-detail/CostPanel";
 import { AssignAgentPanel } from "@/components/ticket-detail/AssignAgentPanel";
 import { criteriaProgress, toNameMap } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Ticket as TicketIcon } from "lucide-react";
 
 export function TicketDetailClient() {
   const { id } = useParams<{ id: string }>();
@@ -34,7 +36,13 @@ export function TicketDetailClient() {
   }
 
   if (!ticket) {
-    return <p className="text-text-muted text-sm">Ticket not found.</p>;
+    return (
+      <EmptyState
+        Icon={TicketIcon}
+        title="Ticket not found"
+        sub="This ticket may have been deleted or you may not have access."
+      />
+    );
   }
 
   const pct = criteriaProgress(ticket.acceptance_criteria);

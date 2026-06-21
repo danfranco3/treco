@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { fetchTickets } from "@/lib/api";
 import { TicketRow } from "@/components/tickets/TicketRow";
 import { TicketFilter } from "@/components/tickets/TicketFilter";
-import { EmptyState } from "@/components/ui/EmptyState";
+import { EmptyState, EmptyTickets } from "@/components/ui/EmptyState";
 import { Ticket as TicketIcon } from "lucide-react";
 import { Spinner } from "@/components/ui/Spinner";
 import { Card } from "@/components/ui/Card";
@@ -14,6 +15,7 @@ import { Card } from "@/components/ui/Card";
 const PAGE_SIZE = 50;
 
 export default function TicketsPage() {
+  const router = useRouter();
   const [source, setSource] = useState("all");
   const [status, setStatus] = useState("all");
   const [offset, setOffset] = useState(0);
@@ -55,8 +57,25 @@ export default function TicketsPage() {
       <TicketFilter source={source} status={status} onSource={setSource} onStatus={setStatus} />
 
       <Card className="p-0 overflow-hidden">
-        {!filtered.length ? (
-          <EmptyState Icon={TicketIcon} title="No tickets found" sub="Import tickets or create one via the API" />
+        {!isLoading && tickets.length === 0 ? (
+          <EmptyTickets
+            onImport={() => router.push("/tickets/import")}
+            onNew={() => router.push("/tickets/new")}
+          />
+        ) : !isLoading && filtered.length === 0 ? (
+          <EmptyState
+            Icon={TicketIcon}
+            title="No tickets match your filters"
+            sub="Try a different source or status, or clear the filters."
+            actions={
+              <button
+                onClick={() => { setSource("all"); setStatus("all"); }}
+                className="btn-secondary text-xs"
+              >
+                Clear filters
+              </button>
+            }
+          />
         ) : (
           <div className="divide-y divide-border-default">
             {filtered.map((ticket) => (

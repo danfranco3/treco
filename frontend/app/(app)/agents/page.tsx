@@ -6,6 +6,7 @@ import { useAgents, useTickets } from "@/lib/hooks";
 import { AgentColumn } from "@/components/agents/AgentColumn";
 import { RegisterAgentModal } from "@/components/agents/RegisterAgentModal";
 import { Spinner } from "@/components/ui/Spinner";
+import { EmptyAgents } from "@/components/ui/EmptyState";
 
 export default function AgentsPage() {
   const { workspaceId } = useWorkspace();
@@ -34,21 +35,27 @@ export default function AgentsPage() {
         </div>
       </div>
 
-      {noneWorking && (
-        <div className="border border-dashed border-border-default rounded-xl px-4 py-3 text-xs text-text-muted">
-          No agents running. In a terminal:{" "}
-          <code className="font-mono text-green-brand">treco start</code>
-          {" — or assign a ticket to an idle agent from the "}
-          <a href="/tickets" className="underline hover:text-text-primary">Tickets</a>
-          {" page."}
-        </div>
-      )}
+      {!isLoading && agents.length === 0 ? (
+        <EmptyAgents />
+      ) : (
+        <>
+          {noneWorking && (
+            <div className="border border-dashed border-border-default rounded-xl px-4 py-3 text-xs text-text-muted">
+              No agents running. In a terminal:{" "}
+              <code className="font-mono text-green-brand">treco start</code>
+              {" — or assign a ticket to an idle agent from the "}
+              <a href="/tickets" className="underline hover:text-text-primary">Tickets</a>
+              {" page."}
+            </div>
+          )}
 
-      <div className="grid grid-cols-3 gap-6">
-        <AgentColumn title="Working" agents={working} tickets={tickets} />
-        <AgentColumn title="Idle"    agents={idle}    tickets={tickets} />
-        <AgentColumn title="Error"   agents={error}   tickets={tickets} />
-      </div>
+          <div className="grid grid-cols-3 gap-6">
+            <AgentColumn title="Working" agents={working} tickets={tickets} />
+            <AgentColumn title="Idle"    agents={idle}    tickets={tickets} />
+            <AgentColumn title="Error"   agents={error}   tickets={tickets} />
+          </div>
+        </>
+      )}
 
       {showRegister && (
         <RegisterAgentModal
