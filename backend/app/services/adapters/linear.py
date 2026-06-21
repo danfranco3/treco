@@ -13,11 +13,41 @@ _STATUS_MAP = {
     "Backlog": "open",
 }
 
-_ISSUE_FIELDS = """
-    identifier
-    title
-    description
-    state { name }
+_QUERY_ISSUE = """
+    query($id: String!) {
+        issue(id: $id) {
+            identifier
+            title
+            description
+            state { name }
+        }
+    }
+"""
+
+_QUERY_ISSUES_BY_TEAM = """
+    query($teamKey: String!) {
+        issues(filter: { team: { key: { eq: $teamKey } } }) {
+            nodes {
+                identifier
+                title
+                description
+                state { name }
+            }
+        }
+    }
+"""
+
+_QUERY_ALL_ISSUES = """
+    query {
+        issues(first: 50) {
+            nodes {
+                identifier
+                title
+                description
+                state { name }
+            }
+        }
+    }
 """
 
 
@@ -37,11 +67,10 @@ class LinearAdapter(TicketAdapter):
         return _STATUS_MAP.get(state_name, "open")
 
     async def fetch_issue(self, issue_id: str, api_key: str) -> NormalizedTicket:
-        query = f"query($id: String!) {{ issue(id: $id) {{ {_ISSUE_FIELDS} }} }}"
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 "https://api.linear.app/graphql",
-                json={"query": query, "variables": {"id": issue_id}},
+                json={"query": _QUERY_ISSUE, "variables": {"id": issue_id}},
                 headers={"Authorization": api_key, "Content-Type": "application/json"},
             )
             r.raise_for_status()
@@ -52,10 +81,10 @@ class LinearAdapter(TicketAdapter):
 
     async def fetch_issues(self, team_key: str | None, token: str, limit: int = 20) -> list[NormalizedTicket]:
         if team_key:
-            query = f"query($teamKey: String!) {{ issues(filter: {{ team: {{ key: {{ eq: $teamKey }} }} }}) {{ nodes {{ {_ISSUE_FIELDS} }} }} }}"
+            query = _QUERY_ISSUES_BY_TEAM
             variables: dict[str, Any] = {"teamKey": team_key}
         else:
-            query = f"query {{ issues(first: 50) {{ nodes {{ {_ISSUE_FIELDS} }} }} }}"
+            query = _QUERY_ALL_ISSUES
             variables = {}
 
         async with httpx.AsyncClient() as client:
