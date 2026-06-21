@@ -7,7 +7,7 @@ session end are captured automatically via Claude Code hooks.
 
 ```bash
 pip install treco
-treco init          # enter your Treco URL + agent API key
+treco init          # enter your Treco URL + workspace ID (generates a new agent API key)
 ```
 
 ## Start a session
@@ -30,7 +30,7 @@ Add to your project's `.claude/settings.json` (or `~/.claude/settings.json` for 
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": ".*",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
@@ -75,7 +75,7 @@ If you don't want to run `treco init`, set env vars instead:
 
 ```bash
 export TRECO_API_KEY=treco_...
-export TRECO_URL=http://localhost:8000
+export TRECO_URL=http://localhost:8001
 ```
 
 ## Multiple agents / parallel sessions
@@ -92,7 +92,7 @@ The Python SDK works with any agent — LangChain, CrewAI, AutoGen, custom:
 ```python
 from treco import TrecoClient
 
-client = TrecoClient(api_key="treco_...", base_url="http://localhost:8000")
+client = TrecoClient(api_key="treco_...", base_url="http://localhost:8001")
 
 async with client.track("ticket-id") as t:
     # your agent work here

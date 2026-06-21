@@ -65,7 +65,7 @@ The `treco` CLI writes `~/.treco/config.json` with `chmod 600` on every save. Th
 ```json
 {
   "api_key": "treco_…",
-  "url": "http://localhost:8001",
+  "base_url": "http://localhost:8001",
   "workspace_id": "…"
 }
 ```
