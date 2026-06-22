@@ -2,16 +2,25 @@
 
 import { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
-import { Settings, Trash2, Copy, Check, ExternalLink } from "lucide-react";
+import { Settings, Trash2, Copy, Check, ExternalLink, Sun, Moon, Monitor } from "lucide-react";
 import { useWorkspace } from "@/lib/workspace";
 import { deleteWorkspace, updateWorkspace } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
+import { useTheme } from "@/lib/theme";
+import { cn } from "@/lib/utils";
 
 const GITHUB_URL = "https://github.com/danfranco3/treco";
+
+const THEME_OPTIONS = [
+  { value: "light" as const, label: "Light", Icon: Sun },
+  { value: "dark"  as const, label: "Dark",  Icon: Moon },
+  { value: "system" as const, label: "System", Icon: Monitor },
+];
 
 export default function SettingsPage() {
   const { workspaceId, setWorkspaceId, workspaces } = useWorkspace();
   const { mutate } = useSWRConfig();
+  const { theme, setTheme } = useTheme();
   const workspace = workspaces.find((w) => w.id === workspaceId);
 
   const [name, setName] = useState(workspace?.name ?? "");
@@ -80,6 +89,28 @@ export default function SettingsPage() {
         <p className="text-sm text-[var(--text-2)] mt-1">Manage workspace configuration.</p>
       </div>
 
+      {/* Appearance */}
+      <Card className="flex flex-col gap-4">
+        <h2 className="text-sm font-semibold text-[var(--text)]">Appearance</h2>
+        <div className="flex gap-2">
+          {THEME_OPTIONS.map(({ value, label, Icon }) => (
+            <button
+              key={value}
+              onClick={() => setTheme(value)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors",
+                theme === value
+                  ? "border-[var(--green)] bg-[var(--green-3)] text-[var(--green-badge-text)]"
+                  : "border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]",
+              )}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+      </Card>
+
       {/* Workspace */}
       <Card className="flex flex-col gap-5">
         <h2 className="text-sm font-semibold text-[var(--text)]">Workspace</h2>
@@ -93,7 +124,7 @@ export default function SettingsPage() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              className="flex-1 bg-white border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--green)] transition-colors"
+              className="flex-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--green)] transition-colors"
             />
             <button
               onClick={handleSave}

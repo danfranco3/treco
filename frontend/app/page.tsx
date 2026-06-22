@@ -100,7 +100,7 @@ export default function LandingPage() {
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
 
       {/* Nav */}
-      <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 border-b border-[var(--border)] bg-white/90 backdrop-blur-sm">
+      <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 border-b border-[var(--border)] bg-[var(--surface)]/90 backdrop-blur-sm">
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-lg bg-[var(--green)] flex items-center justify-center">
             <Leaf className="w-4 h-4 text-white" />
@@ -169,7 +169,7 @@ export default function LandingPage() {
       </section>
 
       {/* Works with */}
-      <FadeUp className="py-12 px-6 border-y border-[var(--border)] bg-white">
+      <FadeUp className="py-12 px-6 border-y border-[var(--border)] bg-[var(--surface)]">
         <div className="max-w-5xl mx-auto">
           <p className="text-xs text-[var(--text-3)] font-medium uppercase tracking-widest mb-6 text-center">
             Works with
@@ -199,7 +199,7 @@ export default function LandingPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {FEATURES.map((f, i) => (
             <FadeUp key={f.title} delay={i * 0.07}>
-              <div className="bg-white border border-[var(--border)] rounded-xl p-6 h-full shadow-card hover:shadow-card-hover transition-shadow">
+              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 h-full shadow-card hover:shadow-card-hover transition-shadow">
                 <div className="w-10 h-10 rounded-xl bg-[var(--green-3)] flex items-center justify-center mb-4">
                   <f.Icon className="w-5 h-5 text-[var(--green)]" />
                 </div>
@@ -212,7 +212,7 @@ export default function LandingPage() {
       </section>
 
       {/* How it works */}
-      <section className="py-24 px-6 bg-white border-y border-[var(--border)]">
+      <section className="py-24 px-6 bg-[var(--surface)] border-y border-[var(--border)]">
         <div className="max-w-5xl mx-auto">
           <FadeUp>
             <h2 className="text-3xl md:text-4xl font-bold tracking-tight mb-16 text-center text-[var(--text)]">
@@ -283,7 +283,7 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="py-10 px-6 border-t border-[var(--border)] bg-white">
+      <footer className="py-10 px-6 border-t border-[var(--border)] bg-[var(--surface)]">
         <div className="max-w-5xl mx-auto flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-2.5">
             <div className="w-6 h-6 rounded-md bg-[var(--green)] flex items-center justify-center">

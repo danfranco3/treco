@@ -26,7 +26,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="bg-white border border-[var(--border)] rounded-xl p-6 shadow-card">
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 shadow-card">
           <a
             href={`${BACKEND}/api/auth/github`}
             className="flex w-full items-center justify-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-4 py-2.5 text-sm font-medium text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors"

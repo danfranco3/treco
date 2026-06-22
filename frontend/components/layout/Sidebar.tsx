@@ -33,7 +33,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
         aria-expanded={mobileOpen}
         aria-controls="sidebar"
         aria-label={mobileOpen ? "Close sidebar" : "Open sidebar"}
-        className="lg:hidden fixed top-4 left-4 z-[var(--z-sticky)] p-2 rounded-lg bg-white border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] shadow-card"
+        className="lg:hidden fixed top-4 left-4 z-[var(--z-sticky)] p-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text-2)] hover:text-[var(--text)] shadow-card"
       >
         {mobileOpen ? <X className="w-4 h-4" aria-hidden="true" /> : <Menu className="w-4 h-4" aria-hidden="true" />}
       </button>
@@ -56,7 +56,7 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
         id="sidebar"
         aria-label="Application sidebar"
         className={cn(
-          "flex-shrink-0 flex flex-col bg-white border-r border-[var(--border)]",
+          "flex-shrink-0 flex flex-col bg-[var(--surface)] border-r border-[var(--border)]",
           "transition-all duration-200 ease-in-out",
           "hidden lg:flex",
           collapsed ? "lg:w-14" : "lg:w-56",

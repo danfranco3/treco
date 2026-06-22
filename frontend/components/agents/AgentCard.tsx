@@ -26,7 +26,7 @@ export function AgentCard({ agent, ticket, totalTokensIn = 0, totalTokensOut = 0
 
   return (
     <div className={cn(
-      "relative bg-white border border-[var(--border)] rounded-xl p-4 pl-5 flex flex-col gap-3 shadow-card",
+      "relative bg-[var(--surface)] border border-[var(--border)] rounded-xl p-4 pl-5 flex flex-col gap-3 shadow-card",
       "transition-shadow duration-200 hover:shadow-card-hover",
       isError && "border-red-200",
     )}>
