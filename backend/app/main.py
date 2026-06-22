@@ -7,9 +7,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.api.router import api_router
 from app.core.config import settings
@@ -151,8 +151,17 @@ app.include_router(api_router, prefix="/api")
 
 
 @app.get("/health", tags=["meta"])
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> JSONResponse:
+    db_status = "ok"
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "error"
+
+    payload = {"status": "ok", "db": db_status, "version": app.version}
+    status_code = 503 if db_status == "error" else 200
+    return JSONResponse(content=payload, status_code=status_code)
 
 
 _ui_dir = _find_ui_dir()
