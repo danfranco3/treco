@@ -11,6 +11,8 @@ Usage:
   treco done                        End active session, mark ticket done
   treco status                      Show active session info
   treco inject [ticket-id]          Write ticket context into the active agent config
+  treco logs [ticket-id] [--limit N] [--follow]
+                                    Stream recent events for a ticket to stdout
 
   treco connect github              Import open issues from GitHub via PAT
   treco connect linear              Import open issues from Linear via API key
@@ -348,6 +350,73 @@ def cmd_status():
         print(f"Ticket:     {s['ticket_id']}")
         print(f"Tokens in:  {s.get('tokens_in', 0):,}")
         print(f"Tokens out: {s.get('tokens_out', 0):,}")
+
+
+def _format_event(event: dict) -> str:
+    ts = event.get("created_at", "")[:19].replace("T", " ")
+    etype = event.get("event_type", "")
+    payload = event.get("payload") or {}
+    message = payload.get("message", "")
+    tokens_in = event.get("tokens_in", 0)
+    tokens_out = event.get("tokens_out", 0)
+    token_str = f"  [{tokens_in}↑ {tokens_out}↓]" if tokens_in or tokens_out else ""
+    detail = f"  {message}" if message else ""
+    return f"{ts}  {etype:<20}{detail}{token_str}"
+
+
+def cmd_logs(ticket_id: str = "", limit: int = 50, follow: bool = False) -> None:
+    cfg = require_config()
+    if not ticket_id:
+        s = load_session()
+        ticket_id = s.get("ticket_id", "")
+    if not ticket_id:
+        print("No ticket ID. Pass one or start a session.", file=sys.stderr)
+        sys.exit(1)
+
+    url = f"{cfg['base_url']}/api/events/ticket/{ticket_id}"
+    headers = {"X-Agent-Key": cfg["api_key"]}
+
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            r = client.get(url, headers=headers)
+            if r.status_code == 404:
+                print(f"Ticket not found: {ticket_id}", file=sys.stderr)
+                sys.exit(1)
+            r.raise_for_status()
+            events: list[dict] = r.json()
+    except httpx.HTTPStatusError as exc:
+        print(f"Error {exc.response.status_code}: {exc.response.text}", file=sys.stderr)
+        sys.exit(1)
+    except httpx.RequestError as exc:
+        print(f"Connection failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    shown = events[-limit:] if len(events) > limit else events
+    for ev in shown:
+        print(_format_event(ev))
+
+    if not follow:
+        return
+
+    seen_ids: set[str] = {ev["id"] for ev in events}
+
+    try:
+        while True:
+            import time
+            time.sleep(2)
+            try:
+                with httpx.Client(timeout=8.0) as client:
+                    r = client.get(url, headers=headers)
+                    r.raise_for_status()
+                    fresh: list[dict] = r.json()
+            except Exception:
+                continue
+            for ev in fresh:
+                if ev["id"] not in seen_ids:
+                    print(_format_event(ev))
+                    seen_ids.add(ev["id"])
+    except KeyboardInterrupt:
+        pass
 
 
 # ── inject ────────────────────────────────────────────────────────────────────
@@ -737,6 +806,26 @@ def main():
         cmd_status()
     elif cmd == "inject":
         cmd_inject(args[1] if len(args) >= 2 else "")
+    elif cmd == "logs":
+        rest = args[1:]
+        ticket_id = ""
+        limit = 50
+        follow = False
+        i = 0
+        while i < len(rest):
+            if rest[i] in ("--follow", "-f"):
+                follow = True
+            elif rest[i] == "--limit" and i + 1 < len(rest):
+                try:
+                    limit = int(rest[i + 1])
+                except ValueError:
+                    print("--limit requires an integer", file=sys.stderr)
+                    sys.exit(1)
+                i += 1
+            elif not rest[i].startswith("-"):
+                ticket_id = rest[i]
+            i += 1
+        cmd_logs(ticket_id, limit, follow)
     elif cmd == "connect" and len(args) >= 2:
         {"github": cmd_connect_github, "linear": cmd_connect_linear}.get(
             args[1], lambda: print(f"Unknown provider: {args[1]}", file=sys.stderr) or sys.exit(1)
