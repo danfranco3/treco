@@ -29,17 +29,21 @@ Then install the CLI and point it at your local instance:
 
 ```bash
 pip install "treco[server]"
-treco init  # enter http://localhost:8001 when prompted
-treco import https://github.com/org/repo/issues/42
-treco start
-claude "implement the issue"
+treco init                          # enter http://localhost:8001 when prompted
+treco new "My first ticket"         # or: treco import <github-issue-url>
+# answer Y to start the session
+claude "implement the ticket"
+treco done                          # ends session, marks ticket complete
 ```
+
+> **Tip:** `treco import <url>` pulls from GitHub or Linear (requires a token — the CLI will prompt for it).
 
 Seed demo data to see the dashboard with live-looking data:
 
 ```bash
-pip install httpx
-python backend/scripts/seed_demo.py
+cd backend
+pip install -r requirements.txt
+python scripts/seed_demo.py
 ```
 
 ---
@@ -50,11 +54,12 @@ Requires Python 3.11+. No Docker, no Node.js required at runtime. Runs backend +
 
 ```bash
 pip install "treco[server]"
-treco server start        # backend + dashboard at http://localhost:8001
-treco init                # registers agent, wires Claude Code hooks
-treco import https://github.com/org/repo/issues/42
-treco start
-claude "implement the issue"
+treco server start                  # backend + dashboard at http://localhost:8001
+treco init                          # registers agent, wires Claude Code hooks
+treco new "My first ticket"         # or: treco import <github-issue-url>
+# answer Y to start the session
+claude "implement the ticket"
+treco done                          # ends session, marks ticket complete
 ```
 
 Dashboard: http://localhost:8001 · API docs: http://localhost:8001/docs
@@ -178,11 +183,14 @@ async def my_task(ticket_id: str):
 ## Import tickets
 
 ```bash
-# From GitHub issue URL
+# From GitHub issue URL (CLI prompts for a GitHub PAT on first use)
 treco import https://github.com/org/repo/issues/42
 
-# From Linear issue URL
+# From Linear issue URL (CLI prompts for a Linear API key on first use)
 treco import https://linear.app/team/issue/ENG-123
+
+# Custom ticket — no external service needed
+treco new "My ticket title"
 
 # Via API
 curl -X POST http://localhost:8001/api/tickets/fetch \
@@ -190,7 +198,7 @@ curl -X POST http://localhost:8001/api/tickets/fetch \
   -d '{"workspace_id": "my-workspace", "url": "https://github.com/org/repo/issues/42"}'
 ```
 
-Acceptance criteria are extracted from the description via LLM on import (requires `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`), or parsed from markdown checkboxes (`- [ ] criterion text`).
+Acceptance criteria are extracted from the description via LLM on import (requires `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`), or parsed from markdown checkboxes (`- [ ] criterion text`). Without either, criteria can be added interactively via `treco new`.
 
 ---
 
