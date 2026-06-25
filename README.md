@@ -6,7 +6,7 @@ See what your agents are doing, track acceptance criteria, measure token spend p
 
 [![CI](https://github.com/danfranco3/treco/actions/workflows/ci.yml/badge.svg)](https://github.com/danfranco3/treco/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/treco)](https://pypi.org/project/treco/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 
 ![Treco dashboard](docs/dashboard.png)
 
@@ -172,10 +172,12 @@ Full self-hosting guide (Railway, Render, Fly.io, bare VPS): [docs/deployment.md
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). All contributors must sign the [Contributor License Agreement](https://cla-assistant.io/danfranco3/treco) before a PR can be merged.
 
 ---
 
 ## License
 
-MIT
+GNU Affero General Public License v3.0 — see [LICENSE](LICENSE).
+
+Self-hosting is free. You may not offer Treco as a hosted or managed service without a separate commercial agreement. For commercial licensing inquiries, open an issue.

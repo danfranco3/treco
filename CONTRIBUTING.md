@@ -122,6 +122,14 @@ cd frontend && npm run build
 
 ---
 
+## Contributor License Agreement
+
+Before your first PR can be merged, you must sign the CLA. The [cla-assistant bot](https://cla-assistant.io/danfranco3/treco) will comment on your PR automatically with a link to sign. It takes 30 seconds.
+
+**Why:** Treco is AGPL v3. The CLA lets the maintainer offer commercial licenses to enterprises without being bound by every contributor's copyright. Your rights as an open source user are unaffected.
+
+---
+
 ## Security issues
 
 Do not open a public issue for security bugs. See [docs/security.md](docs/security.md) for the responsible disclosure process.
