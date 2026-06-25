@@ -19,9 +19,10 @@ Usage:
   treco connect linear              Import open issues from Linear via API key
   treco import <url>                Import a single issue by URL (GitHub or Linear)
 
-  treco server start [--port N]     Start the backend server as a background daemon
+  treco server start [--port N]     Start the backend + open dashboard in browser
   treco server stop                 Stop the background server
   treco server status               Show whether server is running
+  treco server open                 Open the dashboard in your browser
 
   treco hook post-tool-use          Called by Claude Code PostToolUse hook (reads stdin)
   treco hook stop                   Called by Claude Code Stop hook (reads stdin)
@@ -732,8 +733,16 @@ def cmd_server(args: list[str]) -> None:
         srv.stop()
     elif sub == "status":
         srv.status()
+    elif sub == "open":
+        if not srv.is_running():
+            print("Server not running. Start it first with: treco server start", file=sys.stderr)
+            sys.exit(1)
+        import webbrowser
+        pid = srv._read_pid()
+        webbrowser.open("http://localhost:8001")
+        print("Opening dashboard in browser...")
     else:
-        print(f"Unknown server subcommand: {sub}\nUsage: treco server start|stop|status", file=sys.stderr)
+        print(f"Unknown server subcommand: {sub}\nUsage: treco server start|stop|status|open", file=sys.stderr)
         sys.exit(1)
 
 

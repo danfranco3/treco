@@ -70,6 +70,28 @@ def start(port: int = DEFAULT_PORT) -> None:
     print(f"Treco server started (PID {proc.pid})")
     print(f"  Dashboard: http://localhost:{port}")
     print(f"  API docs:  http://localhost:{port}/docs")
+    _open_browser(port)
+
+
+def _open_browser(port: int) -> None:
+    import threading
+    import time
+    import urllib.request
+
+    url = f"http://localhost:{port}"
+
+    def _wait_and_open() -> None:
+        for _ in range(30):
+            time.sleep(0.5)
+            try:
+                urllib.request.urlopen(f"{url}/health", timeout=1)
+                import webbrowser
+                webbrowser.open(url)
+                return
+            except Exception:
+                continue
+
+    threading.Thread(target=_wait_and_open, daemon=True).start()
 
 
 def stop() -> None:

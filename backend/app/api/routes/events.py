@@ -22,8 +22,11 @@ router = APIRouter()
 
 
 async def _fetch_ticket(ticket_id: str, db: AsyncSession) -> "Ticket | None":
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    return result.scalar_one_or_none()
+    return await db.get(Ticket, ticket_id)
+
+
+def _workspace_events_query(workspace_id: str):
+    return select(AgentEvent).where(AgentEvent.workspace_id == workspace_id)
 
 
 class EventRequest(BaseModel):
@@ -217,8 +220,7 @@ async def list_workspace_events(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(AgentEvent)
-        .where(AgentEvent.workspace_id == workspace_id)
+        _workspace_events_query(workspace_id)
         .order_by(AgentEvent.created_at.desc())
         .limit(min(limit, 500))
     )
@@ -254,8 +256,7 @@ def _event_to_dict(event: AgentEvent) -> dict[str, Any]:
 async def event_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
     async def generator():
         result = await db.execute(
-            select(AgentEvent)
-            .where(AgentEvent.workspace_id == workspace_id)
+            _workspace_events_query(workspace_id)
             .order_by(AgentEvent.created_at.desc())
             .limit(50)
         )
@@ -276,11 +277,7 @@ async def event_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
             if tick % 30 == 0:
                 yield {"comment": "keepalive"}
 
-            q = (
-                select(AgentEvent)
-                .where(AgentEvent.workspace_id == workspace_id)
-                .order_by(AgentEvent.created_at)
-            )
+            q = _workspace_events_query(workspace_id).order_by(AgentEvent.created_at)
             if last_created is not None:
                 q = q.where(AgentEvent.created_at > last_created)
             result = await db.execute(q)

@@ -20,6 +20,10 @@ from app.services.auth import generate_api_key, resolve_agent
 router = APIRouter()
 
 
+def _agents_in_workspace(workspace_id: str):
+    return select(Agent).where(Agent.workspace_id == workspace_id)
+
+
 class CreateAgentRequest(BaseModel):
     workspace_id: str = Field(..., description="Workspace this agent belongs to.", examples=["ws-abc123"])
     name: str = Field(..., description="Human-readable agent name. Must be unique within the workspace.", examples=["agent-fix-login"])
@@ -79,7 +83,7 @@ async def create_agent(req: CreateAgentRequest, db: AsyncSession = Depends(get_d
     description="Return all agents belonging to a workspace. `status` is one of `idle`, `working`, `offline`, `error`.",
 )
 async def list_agents(workspace_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Agent).where(Agent.workspace_id == workspace_id))
+    result = await db.execute(_agents_in_workspace(workspace_id))
     return result.scalars().all()
 
 
@@ -111,7 +115,7 @@ async def agent_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
         tick = 0
         while True:
             result = await db.execute(
-                select(Agent).where(Agent.workspace_id == workspace_id)
+                _agents_in_workspace(workspace_id)
             )
             for agent in result.scalars().all():
                 key = f"{agent.status}:{agent.current_ticket_id}"

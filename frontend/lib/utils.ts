@@ -38,6 +38,12 @@ export function sortChronological<T extends { created_at: string }>(items: T[]):
   return [...items].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 }
 
+// Haiku 4.5 pricing: $0.80/1M input, $4.00/1M output
+export function formatCost(tokensIn: number, tokensOut: number): string {
+  const cost = (tokensIn * 0.0000008) + (tokensOut * 0.000004);
+  return `$${cost.toFixed(4)}`;
+}
+
 export function buildDefaultPrompt(ticket: Ticket): string {
   const criteria = ticket.acceptance_criteria
     .map((c) => `- [${c.done ? "x" : " "}] ${c.text}`)

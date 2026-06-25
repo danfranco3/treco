@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useSWRConfig } from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import type { Ticket } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
-import { criteriaProgress } from "@/lib/utils";
+import { criteriaProgress, formatCost } from "@/lib/utils";
 import { useWorkspace } from "@/lib/workspace";
-import { assignTicketWorkspace } from "@/lib/api";
+import { assignTicketWorkspace, fetchTicketCost } from "@/lib/api";
 
 function MiniProgressRing({ pct }: { pct: number }) {
   const r = 9;
@@ -38,6 +38,11 @@ export function TicketRow({ ticket }: { ticket: Ticket }) {
   const { workspaces } = useWorkspace();
   const { mutate } = useSWRConfig();
   const [assigning, setAssigning] = useState(false);
+  const { data: cost } = useSWR(
+    ["ticket-cost", ticket.id],
+    () => fetchTicketCost(ticket.id),
+    { revalidateOnFocus: false }
+  );
 
   async function handleAssign(e: React.ChangeEvent<HTMLSelectElement>) {
     e.preventDefault();
@@ -55,7 +60,7 @@ export function TicketRow({ ticket }: { ticket: Ticket }) {
   return (
     <div
       className="grid items-center gap-4 px-4 py-2.5 hover:bg-[var(--surface-3)] transition-colors duration-75"
-      style={{ gridTemplateColumns: "1fr 110px 90px 90px 36px" }}
+      style={{ gridTemplateColumns: "1fr 110px 90px 90px 70px 36px" }}
     >
       <Link href={`/tickets/${ticket.id}`} className="min-w-0 flex items-center gap-2">
         <span className="font-mono text-xs text-[var(--text-3)] flex-shrink-0">
@@ -86,6 +91,10 @@ export function TicketRow({ ticket }: { ticket: Ticket }) {
       <div className="flex items-center justify-center">
         <Badge label={ticket.status} />
       </div>
+
+      <span className="text-xs font-mono text-[var(--text-3)] text-right tabular-nums">
+        {cost ? formatCost(cost.total_tokens_in, cost.total_tokens_out) : "—"}
+      </span>
 
       <div className="flex items-center justify-center">
         <MiniProgressRing pct={pct} />
