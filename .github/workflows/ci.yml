@@ -24,7 +24,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt ruff
+        run: pip install -r requirements.txt pytest pytest-asyncio respx ruff
 
       - name: Run tests
         run: pytest tests/ -v
