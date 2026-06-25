@@ -5,7 +5,6 @@ import { useAgents, useTickets, useWorkspaceEvents } from "@/lib/hooks";
 import { StatBar } from "@/components/dashboard/StatBar";
 import { AgentStatusGrid } from "@/components/dashboard/AgentStatusGrid";
 import { EventFeed } from "@/components/dashboard/EventFeed";
-import { DashboardBurndown } from "@/components/dashboard/DashboardBurndown";
 import { Card } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { OnboardingCard } from "@/components/dashboard/OnboardingCard";
@@ -36,18 +35,10 @@ export default function DashboardPage() {
       <StatBar agents={agents} tickets={tickets} events={events} />
 
       <div className="grid grid-cols-3 gap-6 flex-1 min-h-0">
-        <div className="col-span-2 flex flex-col gap-6">
+        <div className="col-span-2">
           <Card>
             <h2 className="text-sm font-semibold text-text-primary mb-4">Agents</h2>
             <AgentStatusGrid agents={agents} tickets={tickets} events={events} />
-          </Card>
-
-          <Card>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-text-primary">Criteria Burndown</h2>
-              <span className="text-xs text-text-muted">today</span>
-            </div>
-            <DashboardBurndown events={events} />
           </Card>
         </div>
 

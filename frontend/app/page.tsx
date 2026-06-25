@@ -116,10 +116,6 @@ export default function LandingPage() {
             <ExternalLink className="w-4 h-4" />
             GitHub
           </a>
-          <Link href="/login"
-            className="text-sm text-[var(--text-2)] hover:text-[var(--text)] transition-colors font-medium">
-            Sign in
-          </Link>
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium bg-[var(--green)] text-white hover:bg-[var(--green-2)] transition-colors">
             Get started
@@ -136,7 +132,7 @@ export default function LandingPage() {
               <span className="ping-slow absolute inline-flex h-full w-full rounded-full bg-[var(--green)] opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--green)]" />
             </span>
-            open source · MIT licensed
+            open source · AGPL v3
           </div>
 
           <h1 className="text-5xl md:text-7xl font-bold tracking-tight leading-[1.08] mb-6 text-[var(--text)]">
@@ -229,9 +225,9 @@ export default function LandingPage() {
               },
               {
                 n: "02",
-                title: "Import a ticket",
-                body: "Point Treco at a GitHub issue, Linear ticket, or Jira story. Acceptance criteria are extracted automatically.",
-                code: "treco import \\\n  github.com/org/repo/issues/42",
+                title: "Create or import a ticket",
+                body: "Create a ticket from the CLI or import from GitHub Issues, Linear, or Jira via the dashboard. Acceptance criteria are extracted automatically.",
+                code: "treco new \"Fix login bug\"\n# or import via dashboard",
               },
               {
                 n: "03",
@@ -263,7 +259,7 @@ export default function LandingPage() {
             Ship with your agents.<br />Know what they built.
           </h2>
           <p className="text-[var(--text-2)] text-lg mb-10">
-            Open source. MIT licensed. Self-host in two commands. No account required.
+            Open source. AGPL v3. Self-host in two commands. No account required.
           </p>
           <div className="flex items-center justify-center gap-4 flex-wrap">
             <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer"
@@ -298,7 +294,7 @@ export default function LandingPage() {
               GitHub
             </a>
             <Link href="/dashboard" className="hover:text-[var(--text)] transition-colors">Dashboard</Link>
-            <span>MIT</span>
+            <span>AGPL v3</span>
           </div>
         </div>
       </footer>

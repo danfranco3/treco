@@ -1,5 +1,4 @@
-import type { Agent, AgentEvent, CostSummary, Ticket, UserProfile, Workspace } from "./types";
-import { getValidToken } from "./auth";
+import type { Agent, AgentEvent, CostSummary, Ticket, Workspace } from "./types";
 
 const BASE = "/api";
 
@@ -164,13 +163,3 @@ export interface BrowseResponse {
 export const browseFs = (path?: string): Promise<BrowseResponse> =>
   get(`/fs/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`);
 
-export async function fetchCurrentUser(): Promise<UserProfile> {
-  const token = await getValidToken();
-  if (!token) throw new Error("Not authenticated");
-  const res = await fetch(`${BASE}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<UserProfile>;
-}
