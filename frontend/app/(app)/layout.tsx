@@ -1,6 +1,8 @@
 import { WorkspaceProvider } from "@/lib/workspace";
 import { StreamProvider } from "@/lib/StreamProvider";
 import { AppShell } from "@/components/layout/AppShell";
+import { CommandPaletteProvider } from "@/components/ui/CommandPaletteProvider";
+import { KeyboardShortcutsProvider } from "@/components/ui/KeyboardShortcutsProvider";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -13,6 +15,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </a>
       <WorkspaceProvider>
         <StreamProvider>
+          <CommandPaletteProvider />
+          <KeyboardShortcutsProvider />
           <AppShell>{children}</AppShell>
         </StreamProvider>
       </WorkspaceProvider>
