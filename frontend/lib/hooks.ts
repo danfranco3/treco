@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import {
-  fetchAgentEvents,
   fetchAgents,
   fetchTicket,
   fetchTicketCost,
@@ -65,31 +64,7 @@ export function useWorkspaceEvents(workspaceId: string) {
   );
 }
 
-export function useAgentEvents(agentId: string) {
-  return useSWR(
-    agentId ? ["agent-events", agentId] : null,
-    () => fetchAgentEvents(agentId),
-    POLL
-  );
-}
-
-// ── utility hooks ─────────────────────────────────────────────────────────────
-
-export function useModal() {
-  const [open, setOpen] = useState(false);
-  return { open, onOpen: () => setOpen(true), onClose: () => setOpen(false) };
-}
-
-export function useCopyToClipboard(timeoutMs = 2000) {
-  const [copied, setCopied] = useState(false);
-  function copy(text: string) {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), timeoutMs);
-    });
-  }
-  return { copied, copy };
-}
+// ── SSE stream hooks ──────────────────────────────────────────────────────────
 
 // ── SSE stream hooks ──────────────────────────────────────────────────────────
 

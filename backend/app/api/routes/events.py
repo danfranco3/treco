@@ -15,10 +15,27 @@ from app.core.database import get_db
 from app.models.agent import Agent
 from app.models.event import AgentEvent
 from app.models.ticket import Ticket
+from app.models.workspace import Workspace
 from app.services.auth import resolve_agent
-from app.services.deviation_detector import check_post_event
 
 router = APIRouter()
+
+
+async def _run_test(test_cmd: str, repo_path: str) -> tuple[bool, str]:
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            test_cmd,
+            cwd=repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=60.0)
+        output = stdout.decode(errors="replace")[:2000]
+        return proc.returncode == 0, output
+    except asyncio.TimeoutError:
+        return False, "Timed out after 60s"
+    except Exception as e:
+        return False, str(e)
 
 
 async def _fetch_ticket(ticket_id: str, db: AsyncSession) -> "Ticket | None":
@@ -31,7 +48,7 @@ def _workspace_events_query(workspace_id: str):
 
 class EventRequest(BaseModel):
     ticket_id: str = Field(..., description="ID of the ticket this event is associated with.", examples=["39a47894-f482-4bb2-906c-13227d2e500e"])
-    event_type: Literal["ticket_started", "criterion_checked", "criterion_failed", "pr_opened", "done", "error", "log", "heartbeat", "deviation"] = Field(
+    event_type: Literal["ticket_started", "criterion_checked", "criterion_failed", "pr_opened", "done", "error", "log", "heartbeat", "deviation", "criterion_verified"] = Field(
         ...,
         description=(
             "Type of event. Key types:\n"
@@ -127,25 +144,47 @@ async def post_event(
     elif req.event_type == EventType.CRITERION_CHECKED and req.criterion_id:
         ticket = await _fetch_ticket(req.ticket_id, db)
         if ticket and ticket.acceptance_criteria:
-            # Deep copy required: shallow list() shares dict refs, so in-place
-            # mutation of c["done"] would also mutate the "committed" state
-            # SQLAlchemy cached, making the column appear unmodified.
             criteria = [dict(c) for c in ticket.acceptance_criteria]
             for c in criteria:
                 if c.get("id") == req.criterion_id:
                     c["done"] = True
+                    if req.payload.get("file_path"):
+                        c["file_path"] = req.payload["file_path"]
+                    if req.payload.get("notes"):
+                        c["notes"] = req.payload["notes"]
                     break
             ticket.acceptance_criteria = criteria
             db.add(ticket)
 
     await db.commit()
 
-    if req.event_type in (EventType.DONE, EventType.LOG, EventType.ERROR):
-        deviations = await check_post_event(event, agent, db)
-        if deviations:
-            for dev in deviations:
-                db.add(dev)
-            await db.commit()
+    if req.event_type == EventType.CRITERION_CHECKED and req.criterion_id:
+        ticket = await _fetch_ticket(req.ticket_id, db)
+        if ticket:
+            for c in ticket.acceptance_criteria or []:
+                if c.get("id") == req.criterion_id and c.get("test_cmd"):
+                    workspace = await db.get(Workspace, agent.workspace_id)
+                    if workspace and workspace.repo_path:
+                        passed, evidence = await _run_test(c["test_cmd"], workspace.repo_path)
+                        updated = [dict(cr) for cr in ticket.acceptance_criteria]
+                        for cr in updated:
+                            if cr.get("id") == req.criterion_id:
+                                cr["verified"] = passed
+                                cr["evidence"] = evidence
+                                break
+                        ticket.acceptance_criteria = updated
+                        db.add(ticket)
+                        db.add(AgentEvent(
+                            id=str(uuid.uuid4()),
+                            agent_id=agent.id,
+                            ticket_id=req.ticket_id,
+                            workspace_id=agent.workspace_id,
+                            event_type=EventType.CRITERION_VERIFIED,
+                            criterion_id=req.criterion_id,
+                            payload={"passed": passed, "evidence": evidence[:500]},
+                        ))
+                        await db.commit()
+                    break
 
     return {"id": event.id}
 

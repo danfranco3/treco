@@ -1,7 +1,12 @@
 export interface Criterion {
   id: string;
   text: string;
+  test_cmd: string | null;
   done: boolean;
+  verified: boolean;
+  evidence: string | null;
+  file_path: string | null;
+  notes: string | null;
 }
 
 export interface Ticket {

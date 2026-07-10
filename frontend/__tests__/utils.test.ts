@@ -136,8 +136,8 @@ describe("buildDefaultPrompt", () => {
     description: "It crashes on startup",
     status: "open",
     acceptance_criteria: [
-      { id: "c1", text: "No crash", done: false },
-      { id: "c2", text: "Tests pass", done: true },
+      { id: "c1", text: "No crash", done: false, test_cmd: null, verified: false, evidence: null, file_path: null, notes: null },
+      { id: "c2", text: "Tests pass", done: true, test_cmd: null, verified: false, evidence: null, file_path: null, notes: null },
     ],
     body: {},
   };

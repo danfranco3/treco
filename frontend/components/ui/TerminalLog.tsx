@@ -75,7 +75,15 @@ export function TerminalLog({ events, agentNames = {}, maxLines = 200 }: Termina
             {agentName && !isHeartbeat && (
               <span className="mx-1 px-1.5 py-0 rounded bg-surface text-text-muted">{agentName}</span>
             )}
-            {msg && <span className={`ml-1 ${isDeviation ? "text-amber-400" : "text-text-primary"}`}>{msg}</span>}
+            {msg && msg.includes("\n") ? (
+              <span className={`ml-1 ${isDeviation ? "text-amber-400" : "text-text-primary"}`}>
+                {msg.split("\n").map((line, li) => (
+                  <span key={li} className="block">{line}</span>
+                ))}
+              </span>
+            ) : msg ? (
+              <span className={`ml-1 ${isDeviation ? "text-amber-400" : "text-text-primary"}`}>{msg}</span>
+            ) : null}
             {url && (
               <a
                 href={url}

@@ -36,7 +36,7 @@ async function patch<T>(path: string, body: unknown): Promise<T> {
 
 async function del(path: string): Promise<void> {
   const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
-  if (!res.ok && res.status !== 204) {
+  if (!res.ok) {
     throw new Error(`API ${res.status}: ${await res.text()}`);
   }
 }
@@ -51,52 +51,55 @@ export interface CreateTicketRequest {
 export const createTicket = (data: CreateTicketRequest): Promise<Ticket> =>
   post("/tickets", data);
 
-export const fetchGitHubIssues = (
-  workspaceId: string,
-  repo: string,
-  token: string
-): Promise<Ticket[]> =>
-  post("/tickets/fetch/bulk", {
-    workspace_id: workspaceId,
-    source: "github",
-    repo,
-    token,
-  });
-
-export const fetchLinearIssues = (
-  workspaceId: string,
-  teamKey: string,
-  apiKey: string
-): Promise<Ticket[]> =>
-  post("/tickets/fetch/bulk", {
-    workspace_id: workspaceId,
-    source: "linear",
-    team_key: teamKey,
-    token: apiKey,
-  });
-
-export interface ImportTicketRequest {
-  workspace_id: string;
-  source: "jira" | "linear" | "asana" | "github";
-  raw: Record<string, unknown>;
-}
-
-export const importTicket = (data: ImportTicketRequest): Promise<Ticket> =>
-  post("/tickets/import", data);
-
 export const fetchTickets = (workspaceId?: string, limit = 50, offset = 0): Promise<Ticket[]> => {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (workspaceId) params.set("workspace_id", workspaceId);
   return get(`/tickets?${params.toString()}`);
 };
 
-export const assignTicketWorkspace = (
-  ticketId: string,
-  workspaceId: string | null
-): Promise<Ticket> => patch(`/tickets/${ticketId}/workspace`, { workspace_id: workspaceId });
-
 export const fetchTicket = (ticketId: string): Promise<Ticket> =>
   get(`/tickets/${ticketId}`);
+
+export const deleteTicket = (ticketId: string): Promise<void> =>
+  del(`/tickets/${ticketId}`);
+
+export interface CriterionInput {
+  id?: string;
+  text: string;
+  test_cmd?: string | null;
+  done?: boolean;
+  verified?: boolean;
+  evidence?: string | null;
+  file_path?: string | null;
+  notes?: string | null;
+}
+
+export const updateTicketCriteria = (ticketId: string, criteria: CriterionInput[]): Promise<Ticket> => {
+  const res = fetch(`/api/tickets/${ticketId}/criteria`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(criteria),
+  });
+  return res.then(async (r) => {
+    if (!r.ok) throw new Error(`API ${r.status}: ${await r.text()}`);
+    return r.json();
+  });
+};
+
+export const refineTicket = (ticketId: string): Promise<Ticket> =>
+  post(`/tickets/${ticketId}/refine`, {});
+
+export interface ImplementTicketRequest {
+  method: "claude_code" | "anthropic";
+  model: string;
+  system_prompt: string;
+}
+
+export const implementTicket = (
+  ticketId: string,
+  data: ImplementTicketRequest
+): Promise<{ agent_id: string; agent_name: string }> =>
+  post(`/tickets/${ticketId}/implement`, data);
 
 export const fetchAgents = (workspaceId: string): Promise<Agent[]> =>
   get(`/agents?workspace_id=${workspaceId}`);
@@ -110,56 +113,13 @@ export const fetchTicketCost = (ticketId: string): Promise<CostSummary> =>
 export const fetchWorkspaceEvents = (workspaceId: string, limit = 100): Promise<AgentEvent[]> =>
   get(`/events/?workspace_id=${workspaceId}&limit=${limit}`);
 
-export const fetchAgentEvents = (agentId: string, limit = 200): Promise<AgentEvent[]> =>
-  get(`/events/agent/${agentId}?limit=${limit}`);
-
-export const createAgent = (data: { workspace_id: string; name: string }) =>
-  post<{ id: string; name: string; status: string; current_ticket_id: string | null; workspace_id: string; api_key: string }>(
-    "/agents",
-    data
-  );
-
-export const assignTicket = (agentId: string, ticketId: string): Promise<{ ok: boolean }> =>
-  post(`/agents/${agentId}/assign`, { ticket_id: ticketId });
-
-export interface ImplementTicketRequest {
-  prompt: string;
-  agent_name?: string;
-}
-
-export const implementTicket = (
-  ticketId: string,
-  data: ImplementTicketRequest
-): Promise<{ agent_id: string; agent_name: string }> =>
-  post(`/tickets/${ticketId}/implement`, data);
 
 export const fetchWorkspaces = (): Promise<Workspace[]> => get("/workspaces");
 
 export const fetchWorkspace = (workspaceId: string): Promise<Workspace> =>
   get(`/workspaces/${workspaceId}`);
 
-export const createWorkspace = (data: { name: string; repo_path: string }): Promise<Workspace> =>
-  post("/workspaces", data);
-
 export const updateWorkspace = (
   workspaceId: string,
   data: { name?: string; repo_path?: string }
 ): Promise<Workspace> => patch(`/workspaces/${workspaceId}`, data);
-
-export const deleteWorkspace = (workspaceId: string): Promise<void> =>
-  del(`/workspaces/${workspaceId}`);
-
-export interface FsEntry {
-  name: string;
-  path: string;
-  is_git_repo: boolean;
-}
-
-export interface BrowseResponse {
-  path: string;
-  entries: FsEntry[];
-}
-
-export const browseFs = (path?: string): Promise<BrowseResponse> =>
-  get(`/fs/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`);
-

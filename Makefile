@@ -1,4 +1,4 @@
-.PHONY: dev backend-dev frontend-dev test lint migrate build-ui sync-backend build-package
+.PHONY: dev backend-dev frontend-dev test lint migrate build-ui sync-backend build-package install-desktop
 
 dev:
 	docker compose up --build
@@ -17,6 +17,14 @@ lint:
 
 migrate:
 	cd backend && alembic upgrade head
+
+install-desktop:
+	@DESKTOP_DIR="$$HOME/.local/share/applications"; \
+	mkdir -p "$$DESKTOP_DIR"; \
+	REPO="$$(pwd)"; \
+	sed "s|Exec=.*|Exec=bash -c \"$$REPO/launch.sh\"|" treco.desktop > "$$DESKTOP_DIR/treco.desktop"; \
+	chmod +x "$$DESKTOP_DIR/treco.desktop"; \
+	echo "Desktop shortcut installed. Look for Treco in your app launcher."
 
 # Build pre-compiled static frontend (Next.js export mode)
 build-ui:

@@ -4,17 +4,13 @@ treco CLI — track agent sessions from the terminal or Claude Code hooks.
 Usage:
   treco init                        Interactive setup, writes ~/.treco/config.json
   treco new [title]                 Create a new ticket (prompts if no title given)
+  treco refine [ticket-id]          Ask AI to propose acceptance criteria + test commands
   treco start [ticket-id]           Start tracking a ticket (picker if no id given)
-  treco check <criterion-id>        Mark a criterion done (uses active session)
+  treco check <criterion-id>        Mark a criterion done — runs test command if set
   treco log   <message>             Log a message to the active ticket
   treco done                        End active session, mark ticket done
   treco status                      Show active session info
   treco inject [ticket-id]          Write ticket context into the active agent config
-
-  treco server start [--port N]     Start the backend + open dashboard in browser
-  treco server stop                 Stop the background server
-  treco server status               Show whether server is running
-  treco server open                 Open the dashboard in your browser
 
   treco hook post-tool-use          Called by Claude Code PostToolUse hook (reads stdin)
   treco hook stop                   Called by Claude Code Stop hook (reads stdin)
@@ -72,6 +68,10 @@ def clear_session() -> None:
 def require_session() -> dict:
     s = load_session()
     if not s.get("ticket_id"):
+        # Fall back to env var (set by implement runner subprocess)
+        ticket_id = os.environ.get("TRECO_TICKET_ID")
+        if ticket_id:
+            return {"ticket_id": ticket_id}
         print("No active session. Run: treco start", file=sys.stderr)
         sys.exit(1)
     return s
@@ -170,10 +170,7 @@ def cmd_init():
     try:
         httpx.get(f"{base_url}/api/tickets?workspace_id={workspace_id}", timeout=2.0)
     except Exception:
-        answer = input("Backend not reachable. Start it now? [Y/n]: ").strip().lower()
-        if answer not in ("n", "no"):
-            from treco.server import start as server_start
-            server_start()
+        print("Backend not reachable. Start it manually: uvicorn app.main:app --port 8001", file=sys.stderr)
 
     try:
         r = httpx.post(
@@ -250,6 +247,35 @@ def cmd_new(title: str = ""):
         cmd_inject(ticket_id, criteria)
 
 
+def cmd_refine(ticket_id: str = ""):
+    cfg = require_config()
+    if not ticket_id:
+        ticket_id = _pick_ticket(cfg)
+    with httpx.Client(timeout=60.0) as client:
+        r = client.post(
+            f"{cfg['base_url']}/api/tickets/{ticket_id}/refine",
+            json={},
+            headers={"X-Agent-Key": cfg["api_key"]},
+        )
+        r.raise_for_status()
+        ticket = r.json()
+
+    criteria = ticket.get("acceptance_criteria") or []
+    if not criteria:
+        print("No criteria proposed — add a description to the ticket first.")
+        return
+
+    print(f"\nProposed criteria for: {ticket['title']}")
+    print("─" * 60)
+    for i, c in enumerate(criteria, 1):
+        mark = "[✓]" if c.get("done") else "[ ]"
+        print(f"  {i}. {mark} {c['text']}")
+        if c.get("test_cmd"):
+            print(f"       test: {c['test_cmd']}")
+    print("─" * 60)
+    print(f"\nEdit or approve in the UI. Ticket: {cfg['base_url']}/tickets/{ticket_id}")
+
+
 def cmd_start(ticket_id: str = ""):
     cfg = require_config()
     if not ticket_id:
@@ -304,10 +330,16 @@ def _pick_ticket(cfg: dict) -> str:
     return open_tickets[choice - 1]["id"]
 
 
-def cmd_check(criterion_id: str):
+def cmd_check(criterion_id: str, file_path: str | None = None, notes: str | None = None):
     cfg = require_config()
     s = require_session()
-    asyncio.run(post_event(cfg, s["ticket_id"], "criterion_checked", criterion_id=criterion_id))
+    payload: dict = {}
+    if file_path:
+        payload["file_path"] = file_path
+    if notes:
+        payload["notes"] = notes
+    asyncio.run(post_event(cfg, s["ticket_id"], "criterion_checked",
+                           criterion_id=criterion_id, payload=payload))
     print(f"Criterion {criterion_id} checked")
 
 
@@ -432,39 +464,6 @@ def cmd_inject(ticket_id: str = "", criteria: list[dict] | None = None):
     print(f"Injected into {target}")
 
 
-# ── server ────────────────────────────────────────────────────────────────────
-
-def cmd_server(args: list[str]) -> None:
-    from treco import server as srv
-
-    sub = args[0] if args else ""
-    if sub == "start":
-        port = 8001
-        if "--port" in args:
-            idx = args.index("--port")
-            try:
-                port = int(args[idx + 1])
-            except (IndexError, ValueError):
-                print("--port requires an integer value", file=sys.stderr)
-                sys.exit(1)
-        srv.start(port)
-    elif sub == "stop":
-        srv.stop()
-    elif sub == "status":
-        srv.status()
-    elif sub == "open":
-        if not srv.is_running():
-            print("Server not running. Start it first with: treco server start", file=sys.stderr)
-            sys.exit(1)
-        import webbrowser
-        pid = srv._read_pid()
-        webbrowser.open("http://localhost:8001")
-        print("Opening dashboard in browser...")
-    else:
-        print(f"Unknown server subcommand: {sub}\nUsage: treco server start|stop|status|open", file=sys.stderr)
-        sys.exit(1)
-
-
 # ── Claude Code hook handlers ─────────────────────────────────────────────────
 
 def _safe_hook(fn):
@@ -583,10 +582,18 @@ def main():
         cmd_init()
     elif cmd == "new":
         cmd_new(" ".join(args[1:]))
+    elif cmd == "refine":
+        cmd_refine(args[1] if len(args) >= 2 else "")
     elif cmd == "start":
         cmd_start(args[1] if len(args) >= 2 else "")
     elif cmd == "check" and len(args) >= 2:
-        cmd_check(args[1])
+        import argparse as _ap
+        _p = _ap.ArgumentParser()
+        _p.add_argument("criterion_id")
+        _p.add_argument("--file", dest="file_path", default=None)
+        _p.add_argument("--notes", default=None)
+        _opts = _p.parse_args(args[1:])
+        cmd_check(_opts.criterion_id, file_path=_opts.file_path, notes=_opts.notes)
     elif cmd == "log" and len(args) >= 2:
         cmd_log(" ".join(args[1:]))
     elif cmd == "done":
@@ -595,8 +602,6 @@ def main():
         cmd_status()
     elif cmd == "inject":
         cmd_inject(args[1] if len(args) >= 2 else "")
-    elif cmd == "server" and len(args) >= 2:
-        cmd_server(args[1:])
     elif cmd == "hook" and len(args) >= 2:
         {
             "post-tool-use": cmd_hook_post_tool_use,

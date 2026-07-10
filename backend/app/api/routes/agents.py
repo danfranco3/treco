@@ -190,37 +190,3 @@ async def cancel_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
     return agent
 
 
-class AssignRequest(BaseModel):
-    ticket_id: str = Field(..., description="Ticket ID to assign to this agent.", examples=["39a47894-f482-4bb2-906c-13227d2e500e"])
-
-
-@router.post(
-    "/{agent_id}/assign",
-    summary="Assign a ticket to an agent",
-    description="Assign a ticket to an agent from the dashboard UI. Emits a `ticket_started` event and sets agent status to `working`. Returns 409 if the agent is already working.",
-)
-async def assign_ticket(
-    agent_id: str,
-    req: AssignRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    agent = await get_or_404(db, Agent, agent_id)
-    if agent.status == AgentStatus.WORKING:
-        raise HTTPException(status_code=409, detail="Agent already working on a ticket")
-
-    agent.status = AgentStatus.WORKING
-    agent.current_ticket_id = req.ticket_id
-    agent.last_seen_at = datetime.utcnow()
-    db.add(agent)
-
-    event = AgentEvent(
-        id=str(uuid.uuid4()),
-        agent_id=agent.id,
-        ticket_id=req.ticket_id,
-        workspace_id=agent.workspace_id,
-        event_type=EventType.TICKET_STARTED,
-        payload={"source": "ui_assign"},
-    )
-    db.add(event)
-    await db.commit()
-    return {"ok": True}

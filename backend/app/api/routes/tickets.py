@@ -1,93 +1,61 @@
-import re
+import asyncio
+import json
 import uuid
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.core.constants import AgentStatus, EventType
 from app.core.database import get_db, get_or_404
+from app.models.agent import Agent
+from app.models.event import AgentEvent
 from app.models.ticket import Ticket
 from app.models.workspace import Workspace
-from app.services import agent_runner
-from app.services.adapters import ADAPTERS
-from app.services.adapters.base import NormalizedTicket
-from app.services.criteria_extractor import create_criterion, extract_criteria
+from app.services.auth import generate_api_key
 
 router = APIRouter()
 
 
-class _WorkspaceIdModel(BaseModel):
-    workspace_id: str
-
-    @field_validator("workspace_id")
-    @classmethod
-    def validate_workspace_id(cls, v: str) -> str:
-        if not v or not v.strip():
-            raise ValueError("workspace_id is required")
-        return v
+def _make_criterion(text: str, test_cmd: str | None = None, done: bool = False) -> dict[str, Any]:
+    return {"id": str(uuid.uuid4()), "text": text, "test_cmd": test_cmd, "done": done, "verified": False, "evidence": None}
 
 
-class ImportTicketRequest(_WorkspaceIdModel):
-    source: Literal["jira", "linear", "asana", "github"] = Field(
-        ..., description="Ticket source system.", examples=["github"]
-    )
-    raw: dict[str, Any] = Field(
-        ..., description="Raw provider API response body. Passed unchanged to the source adapter."
-    )
+def _split_description(description: str | None) -> tuple[str | None, list[str]]:
+    """Extract `- [ ] ...` lines from description; return (cleaned_description, criteria_texts)."""
+    if not description:
+        return description, []
+    criteria: list[str] = []
+    body_lines: list[str] = []
+    for line in description.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- [ ]") or stripped.startswith("- [x]") or stripped.startswith("- [X]"):
+            text = stripped[5:].strip()
+            if text:
+                criteria.append(text)
+        else:
+            body_lines.append(line)
+    cleaned = "\n".join(body_lines).strip() or None
+    return cleaned, criteria
 
 
 class CreateTicketRequest(BaseModel):
-    workspace_id: str | None = Field(None, description="Workspace to assign this ticket to.", examples=["ws-abc123"])
-    title: str = Field(..., description="Short title for the ticket.", examples=["Fix login redirect loop"])
-    description: str | None = Field(None, description="Longer description. Used for LLM criteria extraction if no explicit criteria are provided.")
-    acceptance_criteria: list[str] = Field(
-        default=[],
-        description="Explicit list of acceptance criteria strings. If omitted and description is set, criteria are extracted by LLM.",
-        examples=[["User is redirected to /dashboard after login", "Token is stored in localStorage"]],
-    )
+    workspace_id: str | None = Field(None, examples=["ws-abc123"])
+    title: str = Field(..., examples=["Fix login redirect loop"])
+    description: str | None = Field(None)
+    acceptance_criteria: list[str] = Field(default=[])
 
 
-class FetchGitHubIssueRequest(BaseModel):
-    workspace_id: str = Field(..., description="Workspace to assign the fetched ticket to.", examples=["ws-abc123"])
-    repo: str = Field(..., description="GitHub repo in `owner/name` format.", examples=["acme/backend"])
-    issue_number: int = Field(..., description="GitHub issue number.", examples=[42])
-    token: str = Field(..., description="GitHub personal access token with `repo` or `public_repo` scope.")
-
-
-class FetchLinearIssueRequest(BaseModel):
-    workspace_id: str = Field(..., description="Workspace to assign the fetched ticket to.", examples=["ws-abc123"])
-    issue_id: str = Field(..., description="Linear issue ID (e.g. `ENG-123`).", examples=["ENG-123"])
-    api_key: str = Field(..., description="Linear personal API key.")
-
-
-class FetchAsanaTaskRequest(BaseModel):
-    workspace_id: str = Field(..., description="Workspace to assign the fetched ticket to.", examples=["ws-abc123"])
-    task_gid: str = Field(..., description="Asana task GID.", examples=["1234567890123456"])
-    token: str = Field(..., description="Asana personal access token.")
-
-
-class BulkImportRequest(_WorkspaceIdModel):
-    source: Literal["github", "linear", "asana"] = Field(
-        ..., description="Source system to bulk-import from.", examples=["github"]
-    )
-    token: str = Field(..., description="API token for the source system.")
-    repo: str | None = Field(None, description="GitHub repo (`owner/name`). Required when source is `github`.", examples=["acme/backend"])
-    team_key: str | None = Field(None, description="Linear team key (1–20 uppercase alphanumeric). Required when source is `linear`.", examples=["ENG"])
-    project_gid: str | None = Field(None, description="Asana project GID. Required when source is `asana`.", examples=["1234567890123456"])
-    limit: int = Field(20, description="Max tickets to import (capped at 200).", examples=[20])
-
-    @field_validator("team_key")
-    @classmethod
-    def validate_team_key(cls, v: str | None) -> str | None:
-        if v is not None and not re.fullmatch(r"[A-Z0-9_-]{1,20}", v):
-            raise ValueError("team_key must be 1–20 uppercase alphanumeric characters")
-        return v
-
-
-class FetchUrlRequest(_WorkspaceIdModel):
-    url: str = Field(..., description="Full URL of the ticket. Currently supports public GitHub issue URLs only.", examples=["https://github.com/acme/backend/issues/42"])
+class CriterionInput(BaseModel):
+    id: str | None = None
+    text: str
+    test_cmd: str | None = None
+    done: bool = False
+    verified: bool = False
+    evidence: str | None = None
 
 
 class TicketResponse(BaseModel):
@@ -104,179 +72,17 @@ class TicketResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ImplementTicketRequest(BaseModel):
-    prompt: str = Field(..., description="System prompt / instructions passed to the agent that will work this ticket.", examples=["You are a senior engineer. Follow the acceptance criteria exactly."])
-    agent_name: str | None = Field(None, description="Name for the spawned agent. Auto-generated from ticket title if omitted.", examples=["agent-fix-login"])
-
-    @field_validator("prompt")
-    @classmethod
-    def validate_prompt(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("prompt is required")
-        return v
-
-
-class ImplementTicketResponse(BaseModel):
-    agent_id: str
-    agent_name: str
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class AssignTicketWorkspaceRequest(BaseModel):
-    workspace_id: str | None = None
-
-
-_GITHUB_ISSUE_RE = re.compile(
-    r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/issues/(\d+)"
-)
-
-
-async def _upsert_ticket(db: AsyncSession, workspace_id: str, norm: NormalizedTicket) -> Ticket:
-    result = await db.execute(
-        select(Ticket).where(
-            Ticket.workspace_id == workspace_id,
-            Ticket.source == norm.source,
-            Ticket.source_id == norm.source_id,
-        )
-    )
-    existing = result.scalars().first()
-    if existing:
-        existing.title = norm.title
-        existing.description = norm.description
-        existing.status = norm.status
-        existing.body = norm.body
-        await db.commit()
-        await db.refresh(existing)
-        return existing
-
-    criteria = await extract_criteria(norm.title, norm.description)
-    ticket = Ticket(
-        id=str(uuid.uuid4()),
-        workspace_id=workspace_id,
-        source=norm.source,
-        source_id=norm.source_id,
-        title=norm.title,
-        description=norm.description,
-        status=norm.status,
-        body=norm.body,
-        acceptance_criteria=criteria,
-    )
-    db.add(ticket)
-    await db.commit()
-    await db.refresh(ticket)
-    return ticket
-
-
-@router.post(
-    "/import",
-    response_model=TicketResponse,
-    summary="Import ticket from raw provider payload",
-    description="Normalize a raw provider API response (Jira, Linear, Asana, or GitHub) and upsert it as a ticket. Re-posting the same `source`+`source_id` pair updates the existing record.",
-)
-async def import_ticket(req: ImportTicketRequest, db: AsyncSession = Depends(get_db)):
-    adapter = ADAPTERS.get(req.source)
-    if not adapter:
-        raise HTTPException(status_code=400, detail=f"Unsupported source: {req.source}")
-    normalized = adapter.normalize(req.raw)
-    return await _upsert_ticket(db, req.workspace_id, normalized)
-
-
-@router.post(
-    "/fetch/github",
-    response_model=TicketResponse,
-    summary="Fetch and import a GitHub issue",
-    description="Fetch a single GitHub issue by repo and issue number, normalize it, and upsert it as a ticket. Requires a GitHub token with `repo` or `public_repo` scope.",
-)
-async def fetch_github_issue(req: FetchGitHubIssueRequest, db: AsyncSession = Depends(get_db)):
-    adapter = ADAPTERS["github"]
-    normalized = await adapter.fetch_issue(req.repo, req.issue_number, req.token)
-    return await _upsert_ticket(db, req.workspace_id, normalized)
-
-
-@router.post(
-    "/fetch/linear",
-    response_model=TicketResponse,
-    summary="Fetch and import a Linear issue",
-    description="Fetch a Linear issue by ID, normalize it, and upsert it as a ticket.",
-)
-async def fetch_linear_issue(req: FetchLinearIssueRequest, db: AsyncSession = Depends(get_db)):
-    adapter = ADAPTERS["linear"]
-    normalized = await adapter.fetch_issue(req.issue_id, req.api_key)
-    return await _upsert_ticket(db, req.workspace_id, normalized)
-
-
-@router.post(
-    "/fetch/asana",
-    response_model=TicketResponse,
-    summary="Fetch and import an Asana task",
-    description="Fetch an Asana task by GID, normalize it, and upsert it as a ticket.",
-)
-async def fetch_asana_task(req: FetchAsanaTaskRequest, db: AsyncSession = Depends(get_db)):
-    adapter = ADAPTERS["asana"]
-    normalized = await adapter.fetch_task(req.task_gid, req.token)
-    return await _upsert_ticket(db, req.workspace_id, normalized)
-
-
-@router.post(
-    "/fetch/bulk",
-    response_model=list[TicketResponse],
-    summary="Bulk import tickets from a source",
-    description="Fetch multiple open tickets from GitHub, Linear, or Asana and upsert each one. Existing tickets (matched by `source`+`source_id`) are updated in place.",
-)
-async def bulk_import(req: BulkImportRequest, db: AsyncSession = Depends(get_db)):
-    if req.source == "github":
-        if not req.repo:
-            raise HTTPException(status_code=400, detail="repo is required for GitHub bulk import")
-        adapter = ADAPTERS["github"]
-        normalized_list = await adapter.fetch_issues(req.repo, req.token, req.limit)
-    elif req.source == "asana":
-        if not req.project_gid:
-            raise HTTPException(status_code=400, detail="project_gid is required for Asana bulk import")
-        adapter = ADAPTERS["asana"]
-        normalized_list = await adapter.fetch_tasks_by_project(req.project_gid, req.token, req.limit)
-    else:
-        adapter = ADAPTERS["linear"]
-        normalized_list = await adapter.fetch_issues(req.team_key, req.token, req.limit)
-    return [await _upsert_ticket(db, req.workspace_id, n) for n in normalized_list]
-
-
-@router.post(
-    "/fetch/url",
-    response_model=TicketResponse,
-    summary="Fetch ticket from a URL",
-    description="Detect the source from the URL and fetch + upsert the ticket. Currently supports public GitHub issue URLs (`https://github.com/{owner}/{repo}/issues/{number}`).",
-)
-async def fetch_url(req: FetchUrlRequest, db: AsyncSession = Depends(get_db)):
-    m = _GITHUB_ISSUE_RE.match(req.url.strip())
-    if m:
-        owner, repo, issue_number = m.groups()
-        adapter = ADAPTERS["github"]
-        normalized = await adapter.fetch_issue(f"{owner}/{repo}", int(issue_number))
-        return await _upsert_ticket(db, req.workspace_id, normalized)
-    raise HTTPException(
-        status_code=400,
-        detail="Unsupported URL. Only public GitHub issue URLs are supported.",
-    )
-
-
-@router.post(
-    "",
-    response_model=TicketResponse,
-    summary="Create a custom ticket",
-    description="Create a ticket with an explicit title, description, and optional acceptance criteria. If `acceptance_criteria` is omitted and `description` is provided, criteria are extracted by LLM.",
-)
+@router.post("", response_model=TicketResponse)
 async def create_ticket(req: CreateTicketRequest, db: AsyncSession = Depends(get_db)):
-    criteria = [create_criterion(c) for c in req.acceptance_criteria]
-    if not criteria and req.description:
-        criteria = await extract_criteria(req.title, req.description)
+    cleaned_desc, extracted = _split_description(req.description)
+    criteria = [_make_criterion(c) for c in (req.acceptance_criteria or extracted)]
     ticket = Ticket(
         id=str(uuid.uuid4()),
         workspace_id=req.workspace_id,
         source="custom",
         source_id=None,
         title=req.title,
-        description=req.description,
+        description=cleaned_desc,
         status="open",
         body={},
         acceptance_criteria=criteria,
@@ -287,74 +93,162 @@ async def create_ticket(req: CreateTicketRequest, db: AsyncSession = Depends(get
     return ticket
 
 
-@router.get(
-    "/{ticket_id}",
-    response_model=TicketResponse,
-    summary="Get a ticket",
-    description="Retrieve a single ticket by ID. Returns 404 if not found.",
-)
-async def get_ticket(ticket_id: str, db: AsyncSession = Depends(get_db)):
-    return await get_or_404(db, Ticket, ticket_id)
-
-
-@router.post(
-    "/{ticket_id}/implement",
-    response_model=ImplementTicketResponse,
-    summary="Spawn an agent to implement a ticket",
-    description=(
-        "Mint a new agent, assign it to this ticket, and spawn a background `claude` process "
-        "that will work through the acceptance criteria. The agent's API key is returned once — "
-        "the spawned process uses it to post events. Requires the ticket to belong to a workspace "
-        "with a `repo_path` configured."
-    ),
-)
-async def implement_ticket(
+@router.put("/{ticket_id}/criteria", response_model=TicketResponse)
+async def update_criteria(
     ticket_id: str,
-    req: ImplementTicketRequest,
+    criteria: list[CriterionInput],
     db: AsyncSession = Depends(get_db),
 ):
     ticket = await get_or_404(db, Ticket, ticket_id)
-    if not ticket.workspace_id:
-        raise HTTPException(status_code=400, detail="Assign this ticket to a workspace first")
-    workspace = await get_or_404(db, Workspace, ticket.workspace_id)
-    if not workspace.repo_path:
-        raise HTTPException(status_code=400, detail="Workspace has no repo path configured")
-    agent_name = req.agent_name or f"agent-{ticket.title[:24]}"
-    agent, raw_key = await agent_runner.mint_agent(
-        workspace_id=ticket.workspace_id,
-        name=agent_name,
-        db=db,
-    )
-    await agent_runner.spawn_agent_run(agent, raw_key, ticket, req.prompt, workspace.repo_path, db)
-    return ImplementTicketResponse(agent_id=agent.id, agent_name=agent.name)
-
-
-@router.patch(
-    "/{ticket_id}/workspace",
-    response_model=TicketResponse,
-    summary="Assign or unassign a ticket's workspace",
-    description="Set or clear the `workspace_id` on a ticket. Pass `null` to unassign. Returns 404 if the workspace does not exist.",
-)
-async def assign_ticket_workspace(
-    ticket_id: str,
-    req: AssignTicketWorkspaceRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    ticket = await get_or_404(db, Ticket, ticket_id)
-    if req.workspace_id is not None:
-        await get_or_404(db, Workspace, req.workspace_id)
-    ticket.workspace_id = req.workspace_id
+    ticket.acceptance_criteria = [
+        {
+            "id": c.id or str(uuid.uuid4()),
+            "text": c.text,
+            "test_cmd": c.test_cmd,
+            "done": c.done,
+            "verified": c.verified,
+            "evidence": c.evidence,
+        }
+        for c in criteria
+    ]
     await db.commit()
     await db.refresh(ticket)
     return ticket
 
 
-@router.get(
-    "",
-    response_model=list[TicketResponse],
-    summary="List tickets",
-    description="Return tickets ordered by creation time (newest first). Optionally filter by `workspace_id`. `limit` is capped at 200.",
-)
+@router.post("/{ticket_id}/refine", response_model=TicketResponse)
+async def refine_ticket(ticket_id: str, db: AsyncSession = Depends(get_db)):
+    """Call LLM to propose acceptance criteria + test commands for this ticket."""
+    ticket = await get_or_404(db, Ticket, ticket_id)
+    if not ticket.description and not ticket.title:
+        raise HTTPException(status_code=400, detail="Ticket needs a title or description to refine")
+
+    proposed = await _propose_criteria(ticket.title, ticket.description)
+
+    existing = {c["id"]: c for c in (ticket.acceptance_criteria or [])}
+    merged = list(existing.values()) + [c for c in proposed if not any(e["text"] == c["text"] for e in existing.values())]
+    ticket.acceptance_criteria = merged
+    await db.commit()
+    await db.refresh(ticket)
+    return ticket
+
+
+async def _propose_criteria(title: str, description: str | None) -> list[dict[str, Any]]:
+    prompt = f"""You are helping define verifiable acceptance criteria for a software ticket.
+
+Title: {title}
+Description: {description or "(none)"}
+
+Propose 3–5 acceptance criteria. For each, provide:
+- A clear, specific criterion statement
+- A shell command to verify it (e.g. pytest test, curl check, file existence check)
+
+Respond with ONLY a JSON array, no explanation:
+[
+  {{"text": "...", "test_cmd": "..."}},
+  ...
+]"""
+
+    try:
+        if settings.anthropic_api_key:
+            import anthropic
+            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            msg = await client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = msg.content[0].text.strip()
+        elif settings.openai_api_key:
+            import openai
+            client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+            resp = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+            )
+            raw = resp.choices[0].message.content.strip()
+        else:
+            return []
+
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+
+        items = json.loads(raw)
+        return [_make_criterion(item["text"], item.get("test_cmd")) for item in items if "text" in item]
+    except Exception:
+        return []
+
+
+class ImplementRequest(BaseModel):
+    method: Literal["claude_code", "anthropic"]
+    model: str = Field(default="claude-sonnet-5")
+    system_prompt: str = Field(default="")
+
+
+class ImplementResponse(BaseModel):
+    agent_id: str
+    agent_name: str
+
+
+@router.post("/{ticket_id}/implement", response_model=ImplementResponse)
+async def implement_ticket(
+    ticket_id: str,
+    req: ImplementRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.implement import run_anthropic_agent, run_claude_code
+
+    ticket = await get_or_404(db, Ticket, ticket_id)
+
+    workspace: Workspace | None = None
+    if ticket.workspace_id:
+        workspace = await db.get(Workspace, ticket.workspace_id)
+
+    raw_key, key_hash = generate_api_key()
+    agent_name = f"impl-{ticket_id[:8]}"
+    agent = Agent(
+        id=str(uuid.uuid4()),
+        workspace_id=ticket.workspace_id,
+        name=agent_name,
+        api_key_hash=key_hash,
+        status=AgentStatus.WORKING,
+        current_ticket_id=ticket_id,
+    )
+    db.add(agent)
+    db.add(AgentEvent(
+        id=str(uuid.uuid4()),
+        agent_id=agent.id,
+        ticket_id=ticket_id,
+        workspace_id=ticket.workspace_id or "",
+        event_type=EventType.TICKET_STARTED,
+        payload={"method": req.method, "model": req.model},
+    ))
+    await db.commit()
+    await db.refresh(agent)
+
+    runner = run_claude_code if req.method == "claude_code" else run_anthropic_agent
+    asyncio.create_task(runner(agent.id, raw_key, ticket, workspace, req.model, req.system_prompt))
+
+    return ImplementResponse(agent_id=agent.id, agent_name=agent_name)
+
+
+@router.get("/{ticket_id}", response_model=TicketResponse)
+async def get_ticket(ticket_id: str, db: AsyncSession = Depends(get_db)):
+    return await get_or_404(db, Ticket, ticket_id)
+
+
+@router.delete("/{ticket_id}", status_code=204)
+async def delete_ticket(ticket_id: str, db: AsyncSession = Depends(get_db)):
+    ticket = await get_or_404(db, Ticket, ticket_id)
+    await db.delete(ticket)
+    await db.commit()
+
+
+@router.get("", response_model=list[TicketResponse])
 async def list_tickets(
     workspace_id: str | None = None,
     limit: int = 50,

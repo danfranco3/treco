@@ -1,9 +1,6 @@
-import asyncio
 import logging
-import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -11,18 +8,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.constants import AgentStatus
 from app.core.database import AsyncSessionLocal, init_db
 from app.core.logging_config import configure_logging
 from app.core.request_id import RequestIDMiddleware
 
 _DEV_JWT_SECRET = "dev-secret-change-in-production"
 logger = logging.getLogger(__name__)
-
 
 def _find_ui_dir() -> Path | None:
     here = Path(__file__).parent  # app/
@@ -34,112 +28,6 @@ def _find_ui_dir() -> Path | None:
         if c.exists():
             return c
     return None
-
-_STUCK_MINUTES = 5
-
-
-async def _mark_stuck_agents(db: AsyncSession, cutoff: datetime) -> None:
-    from app.models.agent import Agent
-    from app.models.event import AgentEvent
-
-    result = await db.execute(
-        select(Agent)
-        .where(Agent.status == AgentStatus.WORKING)
-        .where(
-            (Agent.last_seen_at == None) | (Agent.last_seen_at < cutoff)  # noqa: E711
-        )
-    )
-    for agent in result.scalars().all():
-        agent.status = AgentStatus.OFFLINE
-        db.add(agent)
-
-        # Don't spam deviation events if we already emitted one recently
-        recent = await db.execute(
-            select(AgentEvent)
-            .where(AgentEvent.agent_id == agent.id)
-            .where(AgentEvent.event_type == "deviation")
-            .where(AgentEvent.created_at > cutoff)
-        )
-        if recent.scalar_one_or_none():
-            continue
-
-        minutes_silent = (
-            int((datetime.utcnow() - agent.last_seen_at).total_seconds() / 60)
-            if agent.last_seen_at
-            else _STUCK_MINUTES
-        )
-        db.add(AgentEvent(
-            id=str(uuid.uuid4()),
-            agent_id=agent.id,
-            ticket_id=agent.current_ticket_id or "",
-            workspace_id=agent.workspace_id,
-            event_type="deviation",
-            payload={
-                "deviation_type": "stuck",
-                "severity": "warning",
-                "message": f"Agent silent for {minutes_silent}+ minutes",
-                "context": {"minutes_silent": minutes_silent},
-            },
-        ))
-
-
-async def _reap_dead_processes(db: AsyncSession, cutoff: datetime) -> None:
-    """Backstop for runs whose in-process reaper was lost (e.g. backend restarted)."""
-    from app.models.agent import Agent
-    from app.models.event import AgentEvent
-
-    pid_result = await db.execute(
-        select(Agent)
-        .where(Agent.status.in_([AgentStatus.WORKING, AgentStatus.OFFLINE]))
-        .where(Agent.pid.isnot(None))
-    )
-    for agent in pid_result.scalars().all():
-        try:
-            os.kill(agent.pid, 0)
-            continue  # still alive
-        except ProcessLookupError:
-            pass
-        except OSError:
-            continue
-
-        recent = await db.execute(
-            select(AgentEvent)
-            .where(AgentEvent.agent_id == agent.id)
-            .where(AgentEvent.event_type.in_(["deviation", "done", "error"]))
-            .where(AgentEvent.created_at > cutoff)
-        )
-        if recent.scalar_one_or_none():
-            continue
-
-        agent.status = "error"
-        agent.pid = None
-        db.add(agent)
-        db.add(AgentEvent(
-            id=str(uuid.uuid4()),
-            agent_id=agent.id,
-            ticket_id=agent.current_ticket_id or "",
-            workspace_id=agent.workspace_id,
-            event_type="deviation",
-            payload={
-                "deviation_type": "process_exited",
-                "severity": "error",
-                "message": "Agent process is no longer running",
-                "context": {},
-            },
-        ))
-
-
-async def _health_monitor() -> None:
-    while True:
-        await asyncio.sleep(60)
-        try:
-            cutoff = datetime.utcnow() - timedelta(minutes=_STUCK_MINUTES)
-            async with AsyncSessionLocal() as db:
-                await _mark_stuck_agents(db, cutoff)
-                await _reap_dead_processes(db, cutoff)
-                await db.commit()
-        except Exception:
-            pass  # monitor must never crash
 
 
 def _validate_jwt_secret() -> None:
@@ -153,16 +41,22 @@ def _validate_jwt_secret() -> None:
         )
 
 
+async def _seed_default_workspace() -> None:
+    from app.models.workspace import Workspace
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Workspace))
+        if not result.scalars().first():
+            db.add(Workspace(id=str(uuid.uuid4()), name="Default", repo_path=None))
+            await db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
     _validate_jwt_secret()
     await init_db()
-    monitor = asyncio.create_task(_health_monitor())
-    try:
-        yield
-    finally:
-        monitor.cancel()
+    await _seed_default_workspace()
+    yield
 
 
 _OPENAPI_TAGS = [
@@ -286,10 +180,6 @@ if _ui_dir:
     @app.get("/tickets/{ticket_id:path}", include_in_schema=False)
     async def _ticket_shell(ticket_id: str) -> FileResponse:
         return _shell_response(_ui_dir / "tickets", ticket_id)
-
-    @app.get("/agents/{agent_id:path}", include_in_schema=False)
-    async def _agent_shell(agent_id: str) -> FileResponse:
-        return _shell_response(_ui_dir / "agents", agent_id)
 
     # Mount last — API routes take priority
     app.mount("/", StaticFiles(directory=_ui_dir, html=True), name="ui")

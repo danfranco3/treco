@@ -2,12 +2,18 @@
 
 import { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
-import { Settings, Trash2, Copy, Check, ExternalLink, Sun, Moon, Monitor } from "lucide-react";
+import { Check, Copy, Sun, Moon, Monitor, ExternalLink } from "lucide-react";
 import { useWorkspace } from "@/lib/workspace";
-import { deleteWorkspace, updateWorkspace } from "@/lib/api";
+import { updateWorkspace } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import {
+  type ImplSettings,
+  DEFAULT_IMPL,
+  loadImplSettings,
+  saveImplSettings,
+} from "@/lib/impl-settings";
 
 const GITHUB_URL = "https://github.com/danfranco3/treco";
 
@@ -18,60 +24,40 @@ const THEME_OPTIONS = [
 ];
 
 export default function SettingsPage() {
-  const { workspaceId, setWorkspaceId, workspaces } = useWorkspace();
+  const { workspaceId, workspace } = useWorkspace();
   const { mutate } = useSWRConfig();
   const { theme, setTheme } = useTheme();
-  const workspace = workspaces.find((w) => w.id === workspaceId);
 
   const [name, setName] = useState(workspace?.name ?? "");
+  const [repoPath, setRepoPath] = useState(workspace?.repo_path ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [impl, setImpl] = useState<ImplSettings>(DEFAULT_IMPL);
+  const [implSaved, setImplSaved] = useState(false);
 
   useEffect(() => {
     if (workspace?.name) setName(workspace.name);
-  }, [workspace?.name]);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState("");
-  const [deleting, setDeleting] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  if (!workspace) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64 gap-2">
-        <Settings className="w-8 h-8 text-[var(--text-3)]" />
-        <p className="text-sm text-[var(--text-2)]">Select a workspace to manage its settings.</p>
-      </div>
-    );
-  }
+    if (workspace?.repo_path != null) setRepoPath(workspace.repo_path);
+    setImpl(loadImplSettings());
+  }, [workspace?.name, workspace?.repo_path]);
 
   async function handleSave() {
-    if (!name.trim() || name === workspace?.name) return;
     setSaving(true);
-    setSaveError("");
+    setError("");
     try {
-      await updateWorkspace(workspaceId, { name: name.trim() });
+      await updateWorkspace(workspaceId, {
+        name: name.trim() || undefined,
+        repo_path: repoPath.trim() || undefined,
+      });
       await mutate("workspaces");
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "Failed to save");
+      setError(e instanceof Error ? e.message : "Failed to save");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleDelete() {
-    setDeleting(true);
-    try {
-      await deleteWorkspace(workspaceId);
-      await mutate("workspaces");
-      const remaining = workspaces.filter((w) => w.id !== workspaceId);
-      setWorkspaceId(remaining[0]?.id ?? "");
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "Failed to delete");
-    } finally {
-      setDeleting(false);
-      setConfirmDelete(false);
     }
   }
 
@@ -84,12 +70,8 @@ export default function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-8 max-w-2xl">
-      <div>
-        <h1 className="text-xl font-bold text-[var(--text)]">Settings</h1>
-        <p className="text-sm text-[var(--text-2)] mt-1">Manage workspace configuration.</p>
-      </div>
+      <h1 className="text-xl font-bold text-[var(--text)]">Settings</h1>
 
-      {/* Appearance */}
       <Card className="flex flex-col gap-4">
         <h2 className="text-sm font-semibold text-[var(--text)]">Appearance</h2>
         <div className="flex gap-2">
@@ -111,110 +93,108 @@ export default function SettingsPage() {
         </div>
       </Card>
 
-      {/* Workspace */}
       <Card className="flex flex-col gap-5">
         <h2 className="text-sm font-semibold text-[var(--text)]">Workspace</h2>
 
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-[var(--text-2)]" htmlFor="ws-name">Name</label>
-          <div className="flex gap-2">
-            <input
-              id="ws-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              className="flex-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--green)] transition-colors"
-            />
-            <button
-              onClick={handleSave}
-              disabled={saving || !name.trim() || name === workspace.name}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[var(--green)] text-white rounded-lg hover:bg-[var(--green-2)] disabled:opacity-40 transition-colors"
-            >
-              {saved ? <Check className="w-3.5 h-3.5" /> : null}
-              {saved ? "Saved" : saving ? "Saving…" : "Save"}
-            </button>
-          </div>
-          {saveError && <p className="text-xs text-red-600">{saveError}</p>}
+          <input
+            id="ws-name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] focus:outline-none focus:border-[var(--green)] transition-colors"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-[var(--text-2)]" htmlFor="ws-repo">Repo Path</label>
+          <input
+            id="ws-repo"
+            type="text"
+            value={repoPath}
+            onChange={(e) => setRepoPath(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSave()}
+            placeholder="/absolute/path/to/repo"
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] font-mono placeholder-[var(--text-3)] focus:outline-none focus:border-[var(--green)] transition-colors"
+          />
+          <p className="text-xs text-[var(--text-3)]">Used to run verification test commands.</p>
         </div>
 
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-[var(--text-2)]">Workspace ID</label>
           <div className="flex items-center gap-2 bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-2">
             <code className="flex-1 text-xs font-mono text-[var(--text-2)] truncate">{workspaceId}</code>
-            <button
-              onClick={copyId}
-              className="flex items-center gap-1 text-xs text-[var(--text-3)] hover:text-[var(--text-2)] transition-colors"
-            >
+            <button onClick={copyId} className="text-[var(--text-3)] hover:text-[var(--text-2)] transition-colors">
               {copied ? <Check className="w-3.5 h-3.5 text-[var(--green)]" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
           </div>
-          <p className="text-xs text-[var(--text-3)]">Pass this to the SDK: <code className="font-mono">TRECO_WORKSPACE_ID=…</code></p>
+          <p className="text-xs text-[var(--text-3)]">Pass to CLI: <code className="font-mono">TRECO_WORKSPACE_ID=…</code></p>
         </div>
 
-        {workspace.repo_path && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-[var(--text-2)]">Repository</label>
-            <div className="bg-[var(--surface-2)] border border-[var(--border)] rounded-lg px-3 py-2">
-              <code className="text-xs font-mono text-[var(--text-2)]">{workspace.repo_path}</code>
-            </div>
-          </div>
-        )}
-      </Card>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[var(--green)] text-white rounded-lg hover:bg-[var(--green-2)] disabled:opacity-40 transition-colors"
+          >
+            {saved ? <Check className="w-3.5 h-3.5" /> : null}
+            {saved ? "Saved" : saving ? "Saving…" : "Save"}
+          </button>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+        </div>
 
-      {/* SDK quick-start */}
-      <Card className="flex flex-col gap-4">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Quick start</h2>
-        <p className="text-xs text-[var(--text-2)]">Connect an agent to this workspace:</p>
         <pre className="text-xs font-mono bg-stone-900 rounded-lg px-4 py-3 text-green-400 overflow-x-auto leading-5">{`pip install treco
-TRECO_WORKSPACE_ID=${workspaceId} treco init
-treco start`}</pre>
+TRECO_WORKSPACE_ID=${workspaceId || "<id>"} treco init
+treco new`}</pre>
       </Card>
 
-      {/* Danger zone */}
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-red-600">Danger zone</h2>
-        <div className="border border-red-200 rounded-xl p-4 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-[var(--text)]">Delete workspace</p>
-            <p className="text-xs text-[var(--text-3)] mt-0.5">Permanently removes this workspace and all associated data.</p>
-          </div>
-          {!confirmDelete ? (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors flex-shrink-0"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Delete
-            </button>
-          ) : (
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <span className="text-xs text-[var(--text-2)]">Sure?</span>
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="px-3 py-1.5 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
-              >
-                {deleting ? "Deleting…" : "Yes, delete"}
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="px-3 py-1.5 text-xs text-[var(--text-2)] hover:text-[var(--text)] transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
+      <Card className="flex flex-col gap-5">
+        <h2 className="text-sm font-semibold text-[var(--text)]">Implementation</h2>
 
-      {/* About */}
-      <div className="flex items-center gap-4 pt-2 border-t border-[var(--border)]">
-        <div className="flex items-center gap-1.5 text-xs text-[var(--text-3)]">
-          <span>Treco v0.1.0</span>
-          <span>·</span>
-          <span>MIT License</span>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-[var(--text-2)]" htmlFor="impl-model">Model</label>
+          <input
+            id="impl-model"
+            type="text"
+            value={impl.model}
+            onChange={(e) => setImpl((s) => ({ ...s, model: e.target.value }))}
+            placeholder="claude-sonnet-5"
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] font-mono placeholder-[var(--text-3)] focus:outline-none focus:border-[var(--green)] transition-colors"
+          />
+          <p className="text-xs text-[var(--text-3)]">Used for both Claude Code and Anthropic modes.</p>
         </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-medium text-[var(--text-2)]" htmlFor="impl-prompt">System Prompt</label>
+          <textarea
+            id="impl-prompt"
+            rows={4}
+            value={impl.system_prompt}
+            onChange={(e) => setImpl((s) => ({ ...s, system_prompt: e.target.value }))}
+            placeholder="You are an expert software engineer..."
+            className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text)] placeholder-[var(--text-3)] focus:outline-none focus:border-[var(--green)] transition-colors resize-y"
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              saveImplSettings(impl);
+              setImplSaved(true);
+              setTimeout(() => setImplSaved(false), 2000);
+            }}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-[var(--green)] text-white rounded-lg hover:bg-[var(--green-2)] transition-colors"
+          >
+            {implSaved ? <Check className="w-3.5 h-3.5" /> : null}
+            {implSaved ? "Saved" : "Save"}
+          </button>
+        </div>
+      </Card>
+
+      <div className="flex items-center gap-4 pt-2 border-t border-[var(--border)]">
+        <span className="text-xs text-[var(--text-3)]">Treco v0.1.0 · AGPL v3</span>
         <a
           href={GITHUB_URL}
           target="_blank"
