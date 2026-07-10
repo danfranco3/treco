@@ -52,7 +52,8 @@ export type EventType =
   | "error"
   | "log"
   | "heartbeat"
-  | "deviation";
+  | "deviation"
+  | "permission_requested";
 
 export interface AgentEvent {
   id: string;

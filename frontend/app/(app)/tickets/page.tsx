@@ -40,7 +40,7 @@ export default function TicketsPage() {
 
   async function handleImplement(ticket: Ticket) {
     const s = loadImplSettings();
-    await implementTicket(ticket.id, { method: "claude_code", model: s.model, system_prompt: s.system_prompt });
+    await implementTicket(ticket.id, { method: "claude_code", model: s.model, system_prompt: s.system_prompt, skip_permissions: s.skip_permissions });
     mutate();
   }
 

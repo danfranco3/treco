@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from app.core.constants import AgentStatus, EventType
+
+# Maps agent_id → active subprocess so the permission_response endpoint
+# can write to stdin without needing to hold a reference elsewhere.
+_active_procs: dict[str, asyncio.subprocess.Process] = {}
 from app.core.database import AsyncSessionLocal
 from app.models.agent import Agent
 from app.models.event import AgentEvent
@@ -39,6 +43,7 @@ async def _emit(
 
 
 async def _finish_agent(agent_id: str, status: str) -> None:
+    _active_procs.pop(agent_id, None)
     async with AsyncSessionLocal() as db:
         agent = await db.get(Agent, agent_id)
         if agent:
@@ -46,6 +51,19 @@ async def _finish_agent(agent_id: str, status: str) -> None:
             agent.current_ticket_id = None
             db.add(agent)
             await db.commit()
+
+
+async def respond_permission(agent_id: str, response: str) -> bool:
+    """Write a y/n response to the waiting subprocess stdin. Returns False if no proc."""
+    proc = _active_procs.get(agent_id)
+    if not proc or not proc.stdin:
+        return False
+    try:
+        proc.stdin.write((response.strip() + "\n").encode())
+        await proc.stdin.drain()
+        return True
+    except Exception:
+        return False
 
 
 async def _mark_criterion(
@@ -118,6 +136,7 @@ async def run_claude_code(
     workspace: Workspace | None,
     model: str,
     system_prompt: str,
+    skip_permissions: bool = True,
 ) -> None:
     ws_id = ticket.workspace_id or ""
     repo_path = (workspace.repo_path if workspace and workspace.repo_path else None) or os.getcwd()
@@ -152,8 +171,10 @@ async def run_claude_code(
             _json.dump(mcp_config, mcp_cfg_file)
             mcp_cfg_path = mcp_cfg_file.name
 
-        args = [
-            "claude", "--dangerously-skip-permissions",
+        args = ["claude"]
+        if skip_permissions:
+            args.append("--dangerously-skip-permissions")
+        args += [
             "-p", task,
             "--output-format", "stream-json",
             "--verbose",
@@ -166,9 +187,11 @@ async def run_claude_code(
             *args,
             cwd=repo_path,
             env=env,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        _active_procs[agent_id] = proc
 
         # Accumulate tool_use input across content_block_delta events (verbose streaming format)
         _partial_tool: dict[str, Any] = {}
@@ -236,6 +259,20 @@ async def run_claude_code(
                         })
                         _partial_tool.clear()
 
+                elif kind == "input_required":
+                    prompt = obj.get("prompt") or obj.get("message") or "Permission required"
+                    request_id = obj.get("request_id") or obj.get("id") or ""
+                    await _emit(agent_id, ticket.id, ws_id, EventType.PERMISSION_REQUESTED, {
+                        "prompt": prompt,
+                        "request_id": request_id,
+                    })
+                    async with AsyncSessionLocal() as db:
+                        agent = await db.get(Agent, agent_id)
+                        if agent:
+                            agent.status = AgentStatus.AWAITING_APPROVAL
+                            db.add(agent)
+                            await db.commit()
+
                 elif kind == "result":
                     result_text = obj.get("result", "")
                     if result_text:
@@ -252,6 +289,8 @@ async def run_claude_code(
                 await _emit(agent_id, ticket.id, ws_id, EventType.LOG, {"message": "\n".join(lines)})
 
         await asyncio.gather(_drain_stdout(), _drain_stderr())
+        if proc.stdin:
+            proc.stdin.close()
         await proc.wait()
 
         try:

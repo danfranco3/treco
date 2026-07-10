@@ -151,6 +151,39 @@ async def get_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
     return await get_or_404(db, Agent, agent_id)
 
 
+class PermissionResponseRequest(BaseModel):
+    response: str = Field(..., description="'y' to allow, 'n' to deny", examples=["y"])
+
+
+@router.post(
+    "/{agent_id}/permission_response",
+    summary="Respond to a permission request",
+    description="Write a y/n response to the waiting Claude Code subprocess stdin.",
+)
+async def permission_response(
+    agent_id: str,
+    req: PermissionResponseRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.implement import respond_permission
+    agent = await get_or_404(db, Agent, agent_id)
+    sent = await respond_permission(agent_id, req.response)
+    if not sent:
+        raise HTTPException(status_code=409, detail="No active process waiting for input")
+    agent.status = AgentStatus.WORKING
+    db.add(agent)
+    db.add(AgentEvent(
+        id=str(uuid.uuid4()),
+        agent_id=agent_id,
+        ticket_id=agent.current_ticket_id or "",
+        workspace_id=agent.workspace_id,
+        event_type=EventType.LOG,
+        payload={"message": f"Permission {'granted' if req.response.strip() == 'y' else 'denied'} by user"},
+    ))
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post(
     "/{agent_id}/cancel",
     response_model=AgentResponse,
@@ -164,7 +197,14 @@ async def cancel_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
     agent = await get_or_404(db, Agent, agent_id)
     ticket_id = agent.current_ticket_id
 
-    if agent.pid is not None:
+    from app.services.implement import _active_procs
+    proc = _active_procs.pop(agent_id, None)
+    if proc is not None:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+    elif agent.pid is not None:
         try:
             os.kill(agent.pid, signal.SIGTERM)
         except ProcessLookupError:

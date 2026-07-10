@@ -1,11 +1,13 @@
 export interface ImplSettings {
   model: string;
   system_prompt: string;
+  skip_permissions: boolean;
 }
 
 export const DEFAULT_IMPL: ImplSettings = {
   model: "claude-sonnet-5",
   system_prompt: "",
+  skip_permissions: true,
 };
 
 const KEY = "treco_impl_settings";

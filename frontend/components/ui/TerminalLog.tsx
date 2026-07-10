@@ -14,7 +14,8 @@ const TAG: Record<string, { label: string; srLabel: string; color: string }> = {
   error:             { label: "ERROR",      srLabel: "ERROR",             color: "text-red-brand" },
   log:               { label: "LOG",        srLabel: "LOG",               color: "text-text-muted" },
   heartbeat:         { label: "PING",       srLabel: "HEARTBEAT",        color: "text-text-muted opacity-40" },
-  deviation:         { label: "⚠ DEVIATE", srLabel: "WARNING DEVIATION", color: "text-amber-500" },
+  deviation:          { label: "⚠ DEVIATE",    srLabel: "WARNING DEVIATION",     color: "text-amber-500" },
+  permission_requested: { label: "⏸ APPROVAL", srLabel: "PERMISSION REQUESTED", color: "text-amber-400" },
 };
 
 interface TerminalLogProps {

@@ -50,12 +50,35 @@ async def _seed_default_workspace() -> None:
             await db.commit()
 
 
+async def _reap_working_agents() -> None:
+    """Reset any agent stuck at 'working' from a previous server run.
+
+    asyncio tasks are killed on process exit, so any agent that was mid-run
+    when the server stopped will never call _finish_agent. Mark them error.
+    """
+    from app.models.agent import Agent
+    from app.core.constants import AgentStatus
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Agent).where(Agent.status.in_([AgentStatus.WORKING, AgentStatus.AWAITING_APPROVAL]))
+        )
+        stuck = result.scalars().all()
+        for agent in stuck:
+            agent.status = AgentStatus.ERROR
+            agent.current_ticket_id = None
+            db.add(agent)
+        if stuck:
+            await db.commit()
+            logger.info("Reaped %d stuck agent(s) from previous run", len(stuck))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
     _validate_jwt_secret()
     await init_db()
     await _seed_default_workspace()
+    await _reap_working_agents()
     yield
 
 

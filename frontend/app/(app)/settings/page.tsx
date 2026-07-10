@@ -178,6 +178,22 @@ treco new`}</pre>
           />
         </div>
 
+        <label className="flex items-start gap-3 cursor-pointer group">
+          <input
+            type="checkbox"
+            checked={impl.skip_permissions}
+            onChange={(e) => setImpl((s) => ({ ...s, skip_permissions: e.target.checked }))}
+            className="mt-0.5 accent-[var(--green)] w-4 h-4 cursor-pointer"
+          />
+          <span className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium text-[var(--text)]">Skip permissions (Claude Code)</span>
+            <span className="text-xs text-[var(--text-3)]">
+              Runs with <code className="font-mono">--dangerously-skip-permissions</code>. When unchecked, Claude Code
+              will pause for approval on sensitive operations and you&apos;ll respond from the ticket page.
+            </span>
+          </span>
+        </label>
+
         <div className="flex items-center gap-2">
           <button
             onClick={() => {

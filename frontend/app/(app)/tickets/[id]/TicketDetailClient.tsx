@@ -11,7 +11,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { TicketEventLog } from "@/components/ticket-detail/TicketEventLog";
 import { EmptyState, EmptyTicketFetchError } from "@/components/ui/EmptyState";
 import { Ticket as TicketIcon, ChevronDown } from "lucide-react";
-import { updateTicketCriteria, refineTicket, implementTicket } from "@/lib/api";
+import { updateTicketCriteria, refineTicket, implementTicket, respondPermission } from "@/lib/api";
 import { loadImplSettings } from "@/lib/impl-settings";
 import type { Criterion } from "@/lib/types";
 
@@ -46,7 +46,7 @@ function ImplementButton({ ticketId, active, onStarted }: { ticketId: string; ac
     setError("");
     try {
       const s = loadImplSettings();
-      await implementTicket(ticketId, { method, model: s.model, system_prompt: s.system_prompt });
+      await implementTicket(ticketId, { method, model: s.model, system_prompt: s.system_prompt, skip_permissions: s.skip_permissions });
       onStarted?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start");
@@ -245,6 +245,45 @@ function CriterionRow({
   );
 }
 
+function PermissionPanel({ agentId, prompt, onDone }: { agentId: string; prompt: string; onDone: () => void }) {
+  const [loading, setLoading] = useState<"allow" | "deny" | null>(null);
+
+  async function respond(r: "y" | "n") {
+    setLoading(r === "y" ? "allow" : "deny");
+    try {
+      await respondPermission(agentId, r);
+      onDone();
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl">
+      <div className="flex items-center gap-2">
+        <span className="text-amber-600 dark:text-amber-400 text-sm font-semibold">Agent requesting permission</span>
+      </div>
+      <p className="text-sm text-[var(--text)] font-mono whitespace-pre-wrap">{prompt}</p>
+      <div className="flex gap-2">
+        <button
+          onClick={() => respond("y")}
+          disabled={!!loading}
+          className="px-4 py-1.5 text-sm font-medium bg-[var(--green)] text-white rounded-lg hover:bg-[var(--green-2)] disabled:opacity-40 transition-colors"
+        >
+          {loading === "allow" ? "Allowing…" : "Allow"}
+        </button>
+        <button
+          onClick={() => respond("n")}
+          disabled={!!loading}
+          className="px-4 py-1.5 text-sm font-medium border border-[var(--border)] text-[var(--text-2)] rounded-lg hover:text-[var(--text)] disabled:opacity-40 transition-colors"
+        >
+          {loading === "deny" ? "Denying…" : "Deny"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function TicketDetailClient() {
   const { id } = useParams<{ id: string }>();
   const { workspaceId } = useWorkspace();
@@ -395,6 +434,21 @@ export function TicketDetailClient() {
           </button>
         </div>
       </div>
+
+      {(() => {
+        const lastEvent = [...events].reverse().find((e) => e.event_type === "permission_requested" || e.event_type === "log" || e.event_type === "done" || e.event_type === "error");
+        if (lastEvent?.event_type === "permission_requested" && activeAgent) {
+          const payload = lastEvent.payload as { prompt?: string };
+          return (
+            <PermissionPanel
+              agentId={activeAgent.id}
+              prompt={payload.prompt ?? "Permission required"}
+              onDone={() => mutate(["events", id])}
+            />
+          );
+        }
+        return null;
+      })()}
 
       <div style={{ height: 400 }}>
         <TicketEventLog events={events} agents={agents} />

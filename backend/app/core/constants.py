@@ -20,3 +20,4 @@ class EventType(str, Enum):
     HEARTBEAT = "heartbeat"
     DEVIATION = "deviation"
     CRITERION_VERIFIED = "criterion_verified"
+    PERMISSION_REQUESTED = "permission_requested"

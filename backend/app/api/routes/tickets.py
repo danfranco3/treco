@@ -187,6 +187,7 @@ class ImplementRequest(BaseModel):
     method: Literal["claude_code", "anthropic"]
     model: str = Field(default="claude-sonnet-5")
     system_prompt: str = Field(default="")
+    skip_permissions: bool = Field(default=True)
 
 
 class ImplementResponse(BaseModel):
@@ -231,7 +232,8 @@ async def implement_ticket(
     await db.refresh(agent)
 
     runner = run_claude_code if req.method == "claude_code" else run_anthropic_agent
-    asyncio.create_task(runner(agent.id, raw_key, ticket, workspace, req.model, req.system_prompt))
+    kwargs: dict[str, Any] = {"skip_permissions": req.skip_permissions} if req.method == "claude_code" else {}
+    asyncio.create_task(runner(agent.id, raw_key, ticket, workspace, req.model, req.system_prompt, **kwargs))
 
     return ImplementResponse(agent_id=agent.id, agent_name=agent_name)
 

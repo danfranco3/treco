@@ -93,6 +93,7 @@ export interface ImplementTicketRequest {
   method: "claude_code" | "anthropic";
   model: string;
   system_prompt: string;
+  skip_permissions: boolean;
 }
 
 export const implementTicket = (
@@ -100,6 +101,12 @@ export const implementTicket = (
   data: ImplementTicketRequest
 ): Promise<{ agent_id: string; agent_name: string }> =>
   post(`/tickets/${ticketId}/implement`, data);
+
+export const respondPermission = (
+  agentId: string,
+  response: "y" | "n"
+): Promise<{ ok: boolean }> =>
+  post(`/agents/${agentId}/permission_response`, { response });
 
 export const fetchAgents = (workspaceId: string): Promise<Agent[]> =>
   get(`/agents?workspace_id=${workspaceId}`);
