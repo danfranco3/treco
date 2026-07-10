@@ -6,6 +6,8 @@ outlive the request session.
 import asyncio
 import json as _json
 import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from app.core.constants import AgentStatus, EventType
@@ -86,12 +88,9 @@ def _build_task(ticket: Ticket, system_prompt: str, method: str = "anthropic") -
 
     if method == "claude_code":
         mark_instruction = (
-            "IMPORTANT: after completing each criterion, run this bash command:\n"
-            "  treco check <criterion_id> --file <repo_relative_path> --notes \"<one sentence>\"\n"
-            "Example:\n"
-            "  treco check d8a7e9a2-... --file src/components/Foo.tsx --notes \"Removed badge from TopBar\"\n"
-            "Always include --file (the main file you changed) and --notes (what you did). "
-            "Do NOT just mention the ID in text — run the command."
+            "IMPORTANT: after completing each criterion, call the `mark_criterion_done` MCP tool "
+            "with its exact ID, the repo-relative path of the main file you changed, and a one-sentence note. "
+            "Do NOT just mention the ID in text — call the tool."
         )
     else:
         mark_instruction = (
@@ -131,12 +130,34 @@ async def run_claude_code(
         "TRECO_TICKET_ID": ticket.id,
     }
 
+    mcp_server_path = Path(__file__).parent / "mcp_server.py"
+    mcp_config = {
+        "mcpServers": {
+            "treco": {
+                "command": "python3",
+                "args": [str(mcp_server_path)],
+                "env": {
+                    "TRECO_API_KEY": env["TRECO_API_KEY"],
+                    "TRECO_URL": env["TRECO_URL"],
+                    "TRECO_TICKET_ID": env["TRECO_TICKET_ID"],
+                },
+            }
+        }
+    }
+
     try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as mcp_cfg_file:
+            _json.dump(mcp_config, mcp_cfg_file)
+            mcp_cfg_path = mcp_cfg_file.name
+
         args = [
             "claude", "--dangerously-skip-permissions",
             "-p", task,
             "--output-format", "stream-json",
             "--verbose",
+            "--mcp-config", mcp_cfg_path,
         ]
         if model:
             args += ["--model", model]
@@ -232,6 +253,11 @@ async def run_claude_code(
 
         await asyncio.gather(_drain_stdout(), _drain_stderr())
         await proc.wait()
+
+        try:
+            os.unlink(mcp_cfg_path)
+        except OSError:
+            pass
 
         if proc.returncode == 0:
             await _emit(agent_id, ticket.id, ws_id, EventType.DONE, {"exit_code": 0})
