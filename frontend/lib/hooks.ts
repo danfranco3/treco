@@ -12,7 +12,7 @@ import {
 } from "./api";
 import type { Agent, AgentEvent } from "./types";
 
-const POLL = { refreshInterval: 30_000, revalidateOnFocus: false } as const;
+const POLL = { refreshInterval: 30_000, revalidateOnFocus: true } as const;
 
 // ── polling hooks (SSE is primary; these are fallback / initial load) ─────────
 
