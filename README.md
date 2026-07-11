@@ -2,7 +2,7 @@
 
 Real-time observability for AI coding agents.
 
-See what your agents are doing, track acceptance criteria, measure token spend per ticket. Works with Claude Code out of the box. Any HTTP-capable agent works via the Python SDK.
+See what your agents are doing, track acceptance criteria, measure token spend per ticket, and launch Claude Code directly from the dashboard. Works with Claude Code out of the box. Any HTTP-capable agent works via the Python SDK.
 
 [![CI](https://github.com/danfranco3/treco/actions/workflows/ci.yml/badge.svg)](https://github.com/danfranco3/treco/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/treco)](https://pypi.org/project/treco/)
@@ -17,11 +17,14 @@ See what your agents are doing, track acceptance criteria, measure token spend p
 | Feature | Status |
 |---------|--------|
 | CLI — `treco init / new / start / done / check / log / status` | ✅ |
-| Dashboard — agent board, live event feed, ticket detail, cost panel | ✅ |
-| Claude Code hooks (auto token capture, session start/stop) | ✅ |
+| Dashboard — agent board, live event feed, ticket detail | ✅ |
+| Launch Claude Code agent directly from ticket UI | ✅ |
+| Real-time streaming of agent output (stream-json) | ✅ |
+| Permission approval UI — pause and resume agent mid-run | ✅ |
+| Acceptance criteria with file evidence and notes | ✅ |
+| MCP server — agent marks criteria via tool-use (no bash required) | ✅ |
+| Claude Code hooks — auto token capture, session start/stop | ✅ |
 | Python SDK — `TrecoClient` with typed helpers for all event types | ✅ |
-| Import tickets from GitHub Issues, Linear, Jira, Asana (via UI) | ✅ |
-| Acceptance criteria extraction via LLM (Anthropic / OpenAI) | ✅ |
 | SQLite (default) and PostgreSQL | ✅ |
 | `treco server start` — pip-only, no Node or Docker required | ✅ |
 | Agent heartbeat timeout (marks offline after 5 min silence) | ✅ |
@@ -107,8 +110,6 @@ treco server status                 Show whether server is running
 treco server open                   Open dashboard in browser (if server already running)
 ```
 
-Full reference: [docs/cli-reference.md](docs/cli-reference.md)
-
 ---
 
 ## Python SDK
@@ -124,15 +125,13 @@ async with TrecoClient(api_key="treco_...", base_url="http://localhost:8001") as
     await client.done(ticket_id)
 ```
 
-Full reference: [docs/sdk-python.md](docs/sdk-python.md)
-
 ---
 
-## Importing tickets
+## Launching agents from the UI
 
-Import from Jira, Linear, GitHub Issues, or Asana via the dashboard UI. Paste the ticket URL and connect your API token — criteria are extracted automatically.
+Open any ticket and click **Implement**. Treco spawns a Claude Code subprocess against your workspace, streams output in real time, and surfaces any permission prompts directly in the dashboard so you can approve or deny without leaving the browser.
 
-For quick manual tickets: `treco new "Ticket title"` from the CLI.
+The agent marks acceptance criteria via an MCP server that Treco injects automatically — no bash commands needed.
 
 ---
 
@@ -143,9 +142,9 @@ For quick manual tickets: `treco new "Ticket title"` from the CLI.
 | `JWT_SECRET` | `dev-secret-change-in-production` | Change for any non-local deployment |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./treco.db` | Use `postgresql+asyncpg://...` for Postgres |
 | `DATABASE_MODE` | `sqlite` | `sqlite` or `postgres` |
-| `LLM_PROVIDER` | `anthropic` | `anthropic` or `openai` |
-| `ANTHROPIC_API_KEY` | — | For LLM criteria extraction (optional) |
+| `ANTHROPIC_API_KEY` | — | Required to launch Claude Code agents from the UI |
 | `OPENAI_API_KEY` | — | Alternative LLM provider |
+| `LLM_PROVIDER` | `anthropic` | `anthropic` or `openai` |
 | `CORS_ORIGINS` | `["http://localhost:3000","http://localhost:8001"]` | Add your frontend origin |
 
 ---
@@ -153,20 +152,6 @@ For quick manual tickets: `treco new "Ticket title"` from the CLI.
 ## Self-hosting
 
 Full self-hosting guide (Railway, Render, Fly.io, bare VPS): [docs/deployment.md](docs/deployment.md)
-
----
-
-## Docs
-
-- [Quickstart](docs/quickstart.md)
-- [Concepts](docs/concepts.md) — tickets, agents, events, criteria, workspaces
-- [CLI reference](docs/cli-reference.md)
-- [SDK reference](docs/sdk-python.md)
-- [Integrations](docs/integrations/) — Jira, Linear, GitHub, Asana
-- [Architecture](docs/architecture.md)
-- [Deployment](docs/deployment.md)
-- [Security](docs/security.md)
-- [FAQ](docs/faq.md)
 
 ---
 
