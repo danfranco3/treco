@@ -2,11 +2,8 @@
 import uuid
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent import Agent
-from app.models.event import AgentEvent
 from app.models.ticket import Ticket
 from tests.shared import TestSessionLocal
 
@@ -201,7 +198,8 @@ class _RemovedImplementTicket:
         with patch("app.api.routes.tickets.agent_runner.mint_agent") as mock_mint, \
              patch("app.api.routes.tickets.agent_runner.spawn_agent_run") as mock_spawn:
             from app.models.agent import Agent as AgentModel
-            import hashlib, secrets
+            import hashlib
+            import secrets
             raw_key = "treco_" + secrets.token_urlsafe(16)
             key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
             fake_agent = AgentModel(

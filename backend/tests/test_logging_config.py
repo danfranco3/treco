@@ -1,8 +1,6 @@
 """Tests for logging_config: configure_logging sets up expected handlers."""
 import logging
 
-import pytest
-
 from app.core.logging_config import _JSONFormatter, configure_logging
 
 

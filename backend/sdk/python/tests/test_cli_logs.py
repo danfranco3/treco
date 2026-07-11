@@ -1,5 +1,4 @@
 """Tests for cmd_logs: event streaming for a ticket."""
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -137,8 +136,6 @@ class TestCmdLogsErrors:
         assert exc.value.code == 1
 
     def test_exits_on_404(self):
-        import httpx
-
         mock_client = MagicMock()
         mock_client.__enter__ = lambda s: mock_client
         mock_client.__exit__ = MagicMock(return_value=False)

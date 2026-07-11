@@ -1,7 +1,6 @@
 """Tests for the /api/init bootstrap endpoint."""
 import pytest
 
-from app.models.agent import Agent
 from app.models.workspace import Workspace
 from tests.shared import TestSessionLocal
 

@@ -201,6 +201,6 @@ class TestCancelAgent:
             a.pid = 999999999  # unlikely real pid
             await db.commit()
 
-        with patch("os.kill") as mock_kill:
+        with patch("os.kill"):
             r = await client.post(f"/api/agents/{agent.id}/cancel")
         assert r.status_code == 200

@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import AgentStatus, EventType
 from app.core.database import get_db
-from app.models.agent import Agent
 from app.models.event import AgentEvent
 from app.models.ticket import Ticket
 from app.models.workspace import Workspace

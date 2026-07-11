@@ -10,7 +10,6 @@ import argparse
 import asyncio
 import random
 import sys
-import uuid
 from pathlib import Path
 
 # Allow importing backend modules when run as a script

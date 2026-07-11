@@ -1,5 +1,4 @@
 """Tests for cmd_ps: list agents in workspace."""
-import sys
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
 

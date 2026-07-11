@@ -1,9 +1,6 @@
 """Tests for cmd_init: config written, hooks installed, correct URL defaults."""
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 
 def _mock_init_success(base_url="http://localhost:8001", workspace_id="demo", tmp_path=None):
@@ -57,13 +54,9 @@ class TestInstallHooks:
     def test_creates_settings_if_missing(self, tmp_path):
         import treco.cli as cli
 
-        settings_path = tmp_path / "settings.json"
         with patch.object(Path, "home", return_value=tmp_path):
             with patch("treco.cli.Path.home", return_value=tmp_path):
-                target = tmp_path / ".claude" / "settings.json"
                 (tmp_path / ".claude").mkdir(parents=True, exist_ok=True)
-
-                original_fn = cli._install_hooks
 
                 def patched():
                     with patch.object(cli, "CONFIG_FILE", tmp_path / ".treco" / "config.json"):

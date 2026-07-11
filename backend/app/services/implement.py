@@ -11,15 +11,15 @@ from pathlib import Path
 from typing import Any
 
 from app.core.constants import AgentStatus, EventType
-
-# Maps agent_id → active subprocess so the permission_response endpoint
-# can write to stdin without needing to hold a reference elsewhere.
-_active_procs: dict[str, asyncio.subprocess.Process] = {}
 from app.core.database import AsyncSessionLocal
 from app.models.agent import Agent
 from app.models.event import AgentEvent
 from app.models.ticket import Ticket
 from app.models.workspace import Workspace
+
+# Maps agent_id → active subprocess so the permission_response endpoint
+# can write to stdin without needing to hold a reference elsewhere.
+_active_procs: dict[str, asyncio.subprocess.Process] = {}
 
 
 async def _emit(

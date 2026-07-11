@@ -1,9 +1,6 @@
 """Tests for server daemon: start/stop/status, PID file lifecycle."""
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 
 class TestServerIsRunning:

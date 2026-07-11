@@ -2,7 +2,6 @@
 import uuid
 
 import pytest
-import pytest_asyncio
 
 
 @pytest.mark.asyncio
@@ -28,7 +27,7 @@ async def test_each_request_gets_unique_id(client):
 
 
 def test_jwt_secret_validation_rejects_short_custom_secret():
-    from app.main import _validate_jwt_secret, _DEV_JWT_SECRET
+    from app.main import _validate_jwt_secret
     from app.core import config as cfg_mod
 
     original = cfg_mod.settings.jwt_secret
