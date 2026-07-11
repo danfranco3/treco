@@ -17,3 +17,5 @@ backend/sdk/python/treco/_ui/
 frontend/out/
 *.tsbuildinfo
 .autopilot/
+launch.sh
+treco.desktop
