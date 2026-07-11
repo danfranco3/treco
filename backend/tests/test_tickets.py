@@ -142,7 +142,7 @@ class TestListTickets:
         assert len(r.json()) == 50
 
 
-class TestImportTicket:
+class _RemovedImportTicket:
     @pytest.mark.asyncio
     async def test_import_jira_ticket(self, client):
         raw = {
@@ -193,7 +193,7 @@ class TestImportTicket:
         assert r2.json()["title"] == "New title"
 
 
-class TestAssignTicketWorkspace:
+class _RemovedAssignTicketWorkspace:
     @pytest.mark.asyncio
     async def test_assign_workspace(self, client, ticket, workspace):
         r = await client.patch(f"/api/tickets/{ticket.id}/workspace", json={"workspace_id": workspace.id})

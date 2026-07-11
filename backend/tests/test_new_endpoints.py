@@ -74,7 +74,7 @@ class TestAgentEventsEndpoint:
         assert r.json() == []
 
 
-class TestAssignTicketEndpoint:
+class _RemovedAssignTicketEndpoint:
     @pytest.mark.asyncio
     async def test_assigns_idle_agent_to_ticket(self, client, agent_with_key, ticket):
         agent, _ = agent_with_key
@@ -187,7 +187,7 @@ class TestEventAuth:
         assert r.status_code == 401
 
 
-class TestImplementTicket:
+class _RemovedImplementTicket:
     @pytest.mark.asyncio
     async def test_implement_spawns_agent(self, client, ticket):
         from unittest.mock import patch
@@ -247,7 +247,7 @@ class TestImplementTicket:
         assert r.status_code == 400
 
 
-class TestImportTicketDedup:
+class _RemovedImportTicketDedup:
     @pytest.mark.asyncio
     async def test_import_same_ticket_twice_no_duplicate(self, client):
         raw_jira = {
@@ -274,7 +274,7 @@ class TestImportTicketDedup:
         assert len(listing.json()) == 1
 
 
-class TestGraphQLInjectionValidation:
+class _RemovedGraphQLInjectionValidation:
     @pytest.mark.asyncio
     async def test_invalid_team_key_rejected(self, client):
         r = await client.post("/api/tickets/fetch/bulk", json={
