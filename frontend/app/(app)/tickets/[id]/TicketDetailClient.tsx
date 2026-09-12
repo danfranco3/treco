@@ -1,19 +1,21 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useParams } from "next/navigation";
-import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 import { useSWRConfig } from "swr";
-import { useAgents, useTicket, useTicketEvents } from "@/lib/hooks";
+import { useAgents, useTicket, useTicketEvents, useTicketTelemetry, useTickets, useTicketTraces, useTier } from "@/lib/hooks";
 import { useWorkspace } from "@/lib/workspace";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { TicketEventLog } from "@/components/ticket-detail/TicketEventLog";
+import { TraceTree } from "@/components/control-tower/TraceTree";
+import { MetricsPanel } from "@/components/telemetry/MetricsPanel";
+import { TicketRow } from "@/components/tickets/TicketRow";
 import { EmptyState, EmptyTicketFetchError } from "@/components/ui/EmptyState";
 import { Ticket as TicketIcon, ChevronDown } from "lucide-react";
-import { updateTicketCriteria, refineTicket, implementTicket, respondPermission } from "@/lib/api";
+import { updateTicketCriteria, refineTicket, implementTicket, respondPermission, pauseAgent, resumeAgent } from "@/lib/api";
 import { loadImplSettings } from "@/lib/impl-settings";
-import type { Criterion } from "@/lib/types";
+import type { Agent, Criterion } from "@/lib/types";
 
 type ImplMethod = "claude_code" | "anthropic";
 
@@ -31,6 +33,8 @@ function ImplementButton({ ticketId, active, onStarted }: { ticketId: string; ac
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const { data: tier } = useTier();
+  const cloudLocked = !tier || tier.tier === "free";
 
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -85,11 +89,90 @@ function ImplementButton({ ticketId, active, onStarted }: { ticketId: string; ac
             <span className="font-medium">Anthropic</span>
             <span className="block text-xs text-[var(--text-3)]">Built-in agent loop</span>
           </button>
+          <div className="border-t border-[var(--border)]" />
+          <button
+            disabled={cloudLocked}
+            title={cloudLocked ? "Cloud offload requires a Pro plan" : undefined}
+            className="w-full text-left px-3 py-2.5 text-sm text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <span className="font-medium">Offload to cloud</span>
+            <span className="block text-xs text-[var(--text-3)]">
+              {cloudLocked ? "Pro plan required" : "Run in a micro-VM"}
+            </span>
+          </button>
         </div>
       )}
 
       {error && <p className="absolute top-full mt-1 right-0 text-xs text-red-500 whitespace-nowrap">{error}</p>}
     </div>
+  );
+}
+
+function useDragResize(initial: number, min: number, max: number, invert = false) {
+  const [width, setWidth] = useState(initial);
+
+  function onMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = width;
+    function move(ev: MouseEvent) {
+      const delta = ev.clientX - startX;
+      setWidth(Math.min(max, Math.max(min, startW + (invert ? -delta : delta))));
+    }
+    function up() {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+    }
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  }
+
+  return { width, onMouseDown };
+}
+
+function PaneHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      onMouseDown={onMouseDown}
+      className="hidden xl:block w-1 flex-shrink-0 cursor-col-resize rounded-full hover:bg-green-brand/40 transition-colors"
+    />
+  );
+}
+
+function AgentControls({ agent }: { agent: Agent }) {
+  const [paused, setPaused] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function toggle() {
+    setBusy(true);
+    try {
+      if (paused) {
+        await resumeAgent(agent.id);
+        setPaused(false);
+      } else {
+        await pauseAgent(agent.id);
+        setPaused(true);
+      }
+    } catch {
+      // 409 — agent state changed under us; drop back to unpaused
+      setPaused(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (agent.status !== "working") return null;
+
+  return (
+    <button
+      onClick={toggle}
+      disabled={busy}
+      className="text-xs px-2 py-1 rounded-lg border border-border-default text-text-muted hover:text-text-primary transition-colors disabled:opacity-40"
+    >
+      {paused ? "▶ Resume" : "⏸ Pause"}
+    </button>
   );
 }
 
@@ -286,17 +369,24 @@ function PermissionPanel({ agentId, prompt, onDone }: { agentId: string; prompt:
 
 export function TicketDetailClient() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { workspaceId } = useWorkspace();
   const { mutate } = useSWRConfig();
 
   const { data: ticket, isLoading, error } = useTicket(id);
   const { data: events = [] } = useTicketEvents(id);
   const { data: agents = [] } = useAgents(workspaceId);
+  const { data: traces = [] } = useTicketTraces(id);
+  const { data: metrics = [] } = useTicketTelemetry(id);
+  const { data: allTickets = [] } = useTickets(workspaceId);
 
   const [criteria, setCriteria] = useState<Criterion[] | null>(null);
   const [newText, setNewText] = useState("");
   const [saving, setSaving] = useState(false);
   const [refining, setRefining] = useState(false);
+
+  const leftPane = useDragResize(260, 200, 420);
+  const rightPane = useDragResize(360, 280, 560, true);
 
   const activeCriteria = (criteria ?? ticket?.acceptance_criteria ?? []).map(normalizeCriterion);
 
@@ -355,16 +445,41 @@ export function TicketDetailClient() {
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-3xl mx-auto">
+    <div className="flex h-full min-h-0 gap-2">
+      {/* Left pane — ticket queue */}
+      <aside
+        className="hidden xl:flex flex-col min-h-0 flex-shrink-0 bg-[var(--surface)] border border-[var(--border)] rounded-xl overflow-y-auto divide-y divide-[var(--border)]"
+        style={{ width: leftPane.width }}
+      >
+        {allTickets.map((t) => (
+          <div key={t.id} className={t.id === id ? "bg-[var(--surface-2)]" : undefined}>
+            <TicketRow ticket={t} />
+          </div>
+        ))}
+      </aside>
+      <PaneHandle onMouseDown={leftPane.onMouseDown} />
+
+      {/* Center pane — ticket detail */}
+      <main className="flex-1 min-w-0 overflow-y-auto">
+        <div className="flex flex-col gap-6 max-w-3xl mx-auto">
       <div className="flex flex-col gap-2">
-        <Link href="/tickets" className="text-text-muted hover:text-text-primary text-sm w-fit">← back</Link>
+        <button
+          type="button"
+          onClick={() => (window.history.length > 1 ? router.back() : router.push("/tickets"))}
+          className="text-text-muted hover:text-text-primary text-sm w-fit"
+        >
+          ← back
+        </button>
         <div className="flex items-start justify-between gap-4">
           <h1 className="text-2xl font-bold text-text-primary">{ticket.title}</h1>
-          <ImplementButton
-            ticketId={id}
-            active={!!activeAgent}
-            onStarted={() => mutate(["agents", workspaceId])}
-          />
+          <div className="flex items-center gap-2">
+            {activeAgent && <AgentControls agent={activeAgent} />}
+            <ImplementButton
+              ticketId={id}
+              active={!!activeAgent}
+              onStarted={() => mutate(["agents", workspaceId])}
+            />
+          </div>
         </div>
         {ticket.description && (
           <p className="text-text-muted text-sm">{ticket.description}</p>
@@ -450,9 +565,34 @@ export function TicketDetailClient() {
         return null;
       })()}
 
+      {/* Below xl the right-pane content stacks into the center column */}
+      <div className="xl:hidden flex flex-col gap-6">
+        <MetricsPanel metrics={metrics} />
+        {traces.length > 0 && (
+          <div style={{ height: 280 }}>
+            <TraceTree traces={traces} />
+          </div>
+        )}
+      </div>
+
       <div style={{ height: 400 }}>
         <TicketEventLog events={events} agents={agents} />
       </div>
+        </div>
+      </main>
+
+      <PaneHandle onMouseDown={rightPane.onMouseDown} />
+
+      {/* Right pane — telemetry + trace visualizer */}
+      <aside
+        className="hidden xl:flex flex-col gap-4 min-h-0 flex-shrink-0 overflow-y-auto"
+        style={{ width: rightPane.width }}
+      >
+        <MetricsPanel metrics={metrics} />
+        <div className="flex-1 min-h-0" style={{ minHeight: 240 }}>
+          <TraceTree traces={traces} />
+        </div>
+      </aside>
     </div>
   );
 }

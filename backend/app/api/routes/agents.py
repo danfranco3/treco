@@ -11,10 +11,12 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import AgentStatus, EventType
+from app.core.constants import AgentStatus, EventType, TicketStatus
 from app.core.database import get_db, get_or_404
+from app.core.pubsub import agent_channel, agent_to_dict, bus
 from app.models.agent import Agent
 from app.models.event import AgentEvent
+from app.models.ticket import Ticket
 from app.services.auth import generate_api_key, resolve_agent
 
 router = APIRouter()
@@ -111,32 +113,29 @@ async def get_me(
 )
 async def agent_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
     async def generator():
-        last_snapshot: dict[str, str] = {}
-        tick = 0
-        while True:
-            result = await db.execute(
-                _agents_in_workspace(workspace_id)
-            )
+        # Subscribe before the bootstrap query so nothing published in
+        # between is lost; suppress no-op repeats client-side saw before.
+        with bus.subscribe(agent_channel(workspace_id)) as sub:
+            last_snapshot: dict[str, str] = {}
+
+            result = await db.execute(_agents_in_workspace(workspace_id))
             for agent in result.scalars().all():
-                key = f"{agent.status}:{agent.current_ticket_id}"
-                if last_snapshot.get(agent.id) != key:
-                    last_snapshot[agent.id] = key
-                    yield {
-                        "data": json.dumps({
-                            "id": agent.id,
-                            "name": agent.name,
-                            "status": agent.status,
-                            "current_ticket_id": agent.current_ticket_id,
-                            "workspace_id": agent.workspace_id,
-                        })
-                    }
-            tick += 1
-            if tick % 30 == 0:
-                yield {"comment": "keepalive"}
-            try:
-                await asyncio.sleep(0.5)
-            except asyncio.CancelledError:
-                return
+                last_snapshot[agent.id] = f"{agent.status}:{agent.current_ticket_id}"
+                yield {"data": json.dumps(agent_to_dict(agent))}
+
+            while True:
+                try:
+                    msg = await sub.get(timeout=15.0)
+                except asyncio.CancelledError:
+                    return
+                if msg is None:
+                    yield {"comment": "keepalive"}
+                    continue
+                key = f"{msg['status']}:{msg['current_ticket_id']}"
+                if last_snapshot.get(msg["id"]) == key:
+                    continue
+                last_snapshot[msg["id"]] = key
+                yield {"data": json.dumps(msg)}
 
     return EventSourceResponse(generator())
 
@@ -172,6 +171,11 @@ async def permission_response(
         raise HTTPException(status_code=409, detail="No active process waiting for input")
     agent.status = AgentStatus.WORKING
     db.add(agent)
+    if agent.current_ticket_id:
+        ticket = await db.get(Ticket, agent.current_ticket_id)
+        if ticket and ticket.status == TicketStatus.HITL_REVIEW:
+            ticket.status = TicketStatus.IN_PROGRESS
+            db.add(ticket)
     db.add(AgentEvent(
         id=str(uuid.uuid4()),
         agent_id=agent_id,
@@ -181,7 +185,54 @@ async def permission_response(
         payload={"message": f"Permission {'granted' if req.response.strip() == 'y' else 'denied'} by user"},
     ))
     await db.commit()
+    bus.publish(agent_channel(agent.workspace_id), agent_to_dict(agent))
     return {"ok": True}
+
+
+@router.post(
+    "/{agent_id}/pause",
+    response_model=AgentResponse,
+    summary="Pause a running agent",
+    description="Suspend the agent's loop between steps. In-memory flag — cleared by resume, cancel, or a server restart.",
+)
+async def pause_agent_route(agent_id: str, db: AsyncSession = Depends(get_db)):
+    from app.services.implement import pause_agent
+    agent = await get_or_404(db, Agent, agent_id)
+    if agent.status != AgentStatus.WORKING:
+        raise HTTPException(status_code=409, detail="Agent is not working")
+    pause_agent(agent_id)
+    db.add(AgentEvent(
+        id=str(uuid.uuid4()),
+        agent_id=agent_id,
+        ticket_id=agent.current_ticket_id or "",
+        workspace_id=agent.workspace_id,
+        event_type=EventType.LOG,
+        payload={"message": "Paused by user"},
+    ))
+    await db.commit()
+    return agent
+
+
+@router.post(
+    "/{agent_id}/resume",
+    response_model=AgentResponse,
+    summary="Resume a paused agent",
+)
+async def resume_agent_route(agent_id: str, db: AsyncSession = Depends(get_db)):
+    from app.services.implement import resume_agent
+    agent = await get_or_404(db, Agent, agent_id)
+    if not resume_agent(agent_id):
+        raise HTTPException(status_code=409, detail="Agent is not paused")
+    db.add(AgentEvent(
+        id=str(uuid.uuid4()),
+        agent_id=agent_id,
+        ticket_id=agent.current_ticket_id or "",
+        workspace_id=agent.workspace_id,
+        event_type=EventType.LOG,
+        payload={"message": "Resumed by user"},
+    ))
+    await db.commit()
+    return agent
 
 
 @router.post(
@@ -216,6 +267,10 @@ async def cancel_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
     db.add(agent)
 
     if ticket_id:
+        ticket = await db.get(Ticket, ticket_id)
+        if ticket and ticket.status in (TicketStatus.IN_PROGRESS, TicketStatus.HITL_REVIEW):
+            ticket.status = TicketStatus.BLOCKED
+            db.add(ticket)
         db.add(AgentEvent(
             id=str(uuid.uuid4()),
             agent_id=agent.id,
@@ -227,6 +282,7 @@ async def cancel_agent(agent_id: str, db: AsyncSession = Depends(get_db)):
 
     await db.commit()
     await db.refresh(agent)
+    bus.publish(agent_channel(agent.workspace_id), agent_to_dict(agent))
     return agent
 
 

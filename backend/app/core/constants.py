@@ -7,6 +7,27 @@ class AgentStatus(str, Enum):
     ERROR = "error"
     AWAITING_APPROVAL = "awaiting_approval"
     OFFLINE = "offline"
+    BLOCKED = "blocked"
+    CLOUD_OFFLOADED = "cloud_offloaded"
+
+
+class TicketStatus(str, Enum):
+    """backlog -> in_progress -> hitl_review -> blocked -> done.
+    blocked and hitl_review can return to in_progress. Legacy rows use 'open',
+    treated as backlog; unrecognized values normalize to OPEN."""
+    BACKLOG = "backlog"
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    HITL_REVIEW = "hitl_review"
+    BLOCKED = "blocked"
+    DONE = "done"
+
+    @classmethod
+    def normalize(cls, value: str) -> "TicketStatus":
+        try:
+            return cls(value)
+        except ValueError:
+            return cls.OPEN
 
 
 class EventType(str, Enum):

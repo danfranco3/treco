@@ -7,7 +7,10 @@ import {
   fetchTicket,
   fetchTicketCost,
   fetchTicketEvents,
+  fetchTicketTelemetry,
+  fetchTicketTraces,
   fetchTickets,
+  fetchTier,
   fetchWorkspaceEvents,
 } from "./api";
 import type { Agent, AgentEvent } from "./types";
@@ -54,6 +57,26 @@ export function useTicketCost(ticketId: string) {
     () => fetchTicketCost(ticketId),
     POLL
   );
+}
+
+export function useTicketTraces(ticketId: string) {
+  return useSWR(
+    ticketId ? ["traces", ticketId] : null,
+    () => fetchTicketTraces(ticketId),
+    POLL
+  );
+}
+
+export function useTicketTelemetry(ticketId: string) {
+  return useSWR(
+    ticketId ? ["telemetry", ticketId] : null,
+    () => fetchTicketTelemetry(ticketId),
+    POLL
+  );
+}
+
+export function useTier() {
+  return useSWR("tier", fetchTier, { revalidateOnFocus: false });
 }
 
 export function useWorkspaceEvents(workspaceId: string) {

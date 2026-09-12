@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from sqlalchemy import select, text
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, init_db
+from app.core.demo_mode import DemoModeMiddleware
 from app.core.logging_config import configure_logging
 from app.core.request_id import RequestIDMiddleware
 
@@ -70,6 +72,9 @@ async def _reap_working_agents() -> None:
         if stuck:
             await db.commit()
             logger.info("Reaped %d stuck agent(s) from previous run", len(stuck))
+    for agent in stuck:
+        from app.services.telemetry import record_metric
+        await record_metric(agent.workspace_id, "agent_reaped", 1, "count", agent_id=agent.id)
 
 
 @asynccontextmanager
@@ -79,7 +84,20 @@ async def lifespan(app: FastAPI):
     await init_db()
     await _seed_default_workspace()
     await _reap_working_agents()
+    if settings.demo_mode:
+        from scripts.seed_demo import seed_in_process
+        # DemoModeMiddleware blocks the seeder's own POSTs too — safe to
+        # drop the guard here since this runs before the server accepts
+        # external traffic.
+        settings.demo_mode = False
+        try:
+            await seed_in_process(app)
+        finally:
+            settings.demo_mode = True
+    from app.services.deviation import deviation_watchdog
+    watchdog = asyncio.create_task(deviation_watchdog())
     yield
+    watchdog.cancel()
 
 
 _OPENAPI_TAGS = [
@@ -159,6 +177,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(DemoModeMiddleware)
 
 app.include_router(api_router, prefix="/api")
 
