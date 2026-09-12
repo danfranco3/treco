@@ -7,8 +7,34 @@ on:
     branches: [main, master]
 
 jobs:
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      sdk: ${{ steps.filter.outputs.sdk }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '!backend/sdk/**'
+              - '.github/workflows/**'
+            sdk:
+              - 'backend/sdk/**'
+              - '.github/workflows/**'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/**'
+
   backend:
     name: Backend tests
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -24,16 +50,54 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-asyncio respx ruff
+        run: pip install -r requirements.txt pytest pytest-asyncio pytest-cov respx ruff
 
-      - name: Run tests
-        run: pytest tests/ -v
+      - name: Run tests with coverage
+        run: pytest tests/ -v --cov=app --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
 
       - name: Ruff lint
         run: ruff check .
 
+  sdk:
+    name: SDK / CLI tests
+    needs: changes
+    if: needs.changes.outputs.sdk == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/sdk/python
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install SDK with dev extras
+        run: pip install -e ".[dev]" pytest-cov
+
+      - name: Run tests with coverage
+        run: pytest tests/ -v --cov=treco --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-coverage
+          path: backend/sdk/python/coverage.xml
+
   frontend:
-    name: Frontend build
+    name: Frontend tests + build
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -58,7 +122,28 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Unit tests
+        run: npx jest --ci --coverage
+
       - name: Build
         run: npm run build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8001
+
+  # Single required status for branch protection: passes when every area job
+  # that ran succeeded, and when path-skipped jobs were skipped.
+  ci-ok:
+    name: CI OK
+    needs: [changes, backend, sdk, frontend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any needed job failed or was cancelled
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "job results: $results"
+          for r in $results; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              exit 1
+            fi
+          done

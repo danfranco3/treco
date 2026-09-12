@@ -204,3 +204,48 @@ class TestStopHook:
             cli._run_stop()
 
         # Did not raise
+
+
+class TestSafeHookGuarantees:
+    def test_safe_hook_swallows_exceptions_and_exits_zero(self):
+        import treco.cli as cli
+
+        def explode():
+            raise RuntimeError("hook body crashed")
+
+        with pytest.raises(SystemExit) as exc_info:
+            cli._safe_hook(explode)
+        assert exc_info.value.code == 0
+
+    def test_post_tool_use_hook_survives_unreachable_backend(self, monkeypatch, tmp_path):
+        """The hook must never crash the agent's shell — even mid-network-failure."""
+        import treco.cli as cli
+
+        monkeypatch.setattr(cli, "CONFIG_FILE", tmp_path / "config.json")
+        monkeypatch.setattr(cli, "SESSION_FILE", tmp_path / "session.json")
+        cli.save_config({"api_key": "treco_k", "base_url": "http://127.0.0.1:1"})
+        cli.save_session({"ticket_id": "t1", "tokens_in": 0, "tokens_out": 0})
+
+        with (
+            patch("sys.stdin", StringIO(json.dumps(CLAUDE_CODE_POST_TOOL_USE))),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            cli.cmd_hook_post_tool_use()
+
+        assert exc_info.value.code == 0
+
+    def test_stop_hook_survives_unreachable_backend(self, monkeypatch, tmp_path):
+        import treco.cli as cli
+
+        monkeypatch.setattr(cli, "CONFIG_FILE", tmp_path / "config.json")
+        monkeypatch.setattr(cli, "SESSION_FILE", tmp_path / "session.json")
+        cli.save_config({"api_key": "treco_k", "base_url": "http://127.0.0.1:1"})
+        cli.save_session({"ticket_id": "t1"})
+
+        with (
+            patch("sys.stdin", StringIO(json.dumps(CLAUDE_CODE_STOP))),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            cli.cmd_hook_stop()
+
+        assert exc_info.value.code == 0

@@ -211,3 +211,27 @@ class TestClose:
     async def test_close_is_idempotent(self, client):
         await client.close()
         await client.close()  # should not raise
+
+
+class TestHttpClientReuse:
+    def test_constructor_creates_exactly_one_async_client(self, monkeypatch):
+        import httpx
+        created = []
+        real_init = httpx.AsyncClient.__init__
+
+        def counting_init(self, *args, **kwargs):
+            created.append(self)
+            real_init(self, *args, **kwargs)
+
+        monkeypatch.setattr(httpx.AsyncClient, "__init__", counting_init)
+        TrecoClient(api_key="k", base_url=BASE_URL)
+        assert len(created) == 1
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_same_client_instance_reused_across_calls(self, client):
+        respx.post(f"{BASE_URL}/api/events/").mock(return_value=Response(200, json={"id": "x"}))
+        before = client._http
+        await client.log("t1", "one")
+        await client.log("t1", "two")
+        assert client._http is before

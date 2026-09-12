@@ -3,6 +3,7 @@ import hashlib
 import secrets
 import uuid
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
@@ -50,6 +51,24 @@ async def remote_client():
     transport = ASGITransport(app=app, client=("203.0.113.5", 12345))
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
+
+
+@pytest.fixture
+def service_sessions(monkeypatch):
+    """Point service-module session factories at the test engine.
+
+    Background runners and services (implement, deviation, telemetry, sync)
+    create their own sessions via app.core.database.AsyncSessionLocal, which
+    the get_db override never reaches. This swaps the factory only — same ORM,
+    same schema, no behavioral divergence from production code paths.
+    """
+    import app.services.deviation as deviation
+    import app.services.implement as implement
+    import app.services.sync.base as sync_base
+    import app.services.telemetry as telemetry
+
+    for mod in (implement, deviation, telemetry, sync_base):
+        monkeypatch.setattr(mod, "AsyncSessionLocal", TestSessionLocal)
 
 
 @pytest_asyncio.fixture

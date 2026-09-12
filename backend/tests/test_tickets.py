@@ -216,3 +216,118 @@ class _RemovedAssignTicketWorkspace:
     async def test_assign_nonexistent_ticket_returns_404(self, client, workspace):
         r = await client.patch(f"/api/tickets/{uuid.uuid4()}/workspace", json={"workspace_id": workspace.id})
         assert r.status_code == 404
+
+
+class TestDeleteTicket:
+    @pytest.mark.asyncio
+    async def test_delete_returns_204_and_ticket_gone(self, client, ticket):
+        assert (await client.delete(f"/api/tickets/{ticket.id}")).status_code == 204
+        assert (await client.get(f"/api/tickets/{ticket.id}")).status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_unknown_ticket_returns_404(self, client):
+        assert (await client.delete(f"/api/tickets/{uuid.uuid4()}")).status_code == 404
+
+
+class TestCriteriaExtractionFromDescription:
+    @pytest.mark.asyncio
+    async def test_checkbox_lines_become_criteria(self, client):
+        r = await client.post("/api/tickets", json={
+            "workspace_id": "ws1", "title": "With checkboxes",
+            "description": "Some context\n- [ ] first thing\n- [ ] second thing\nMore text",
+        })
+        data = r.json()
+        texts = [c["text"] for c in data["acceptance_criteria"]]
+        assert texts == ["first thing", "second thing"]
+        assert "- [ ]" not in (data["description"] or "")
+        assert "Some context" in data["description"]
+
+    @pytest.mark.asyncio
+    async def test_explicit_criteria_take_precedence_over_extraction(self, client):
+        r = await client.post("/api/tickets", json={
+            "workspace_id": "ws1", "title": "Explicit wins",
+            "description": "- [ ] extracted",
+            "acceptance_criteria": ["explicit"],
+        })
+        texts = [c["text"] for c in r.json()["acceptance_criteria"]]
+        assert texts == ["explicit"]
+
+
+class TestUpdateCriteria:
+    @pytest.mark.asyncio
+    async def test_replaces_criteria_and_generates_ids(self, client, ticket):
+        r = await client.put(f"/api/tickets/{ticket.id}/criteria", json=[
+            {"text": "new criterion"},
+            {"text": "another", "test_cmd": "pytest -k x", "done": True},
+        ])
+        assert r.status_code == 200
+        criteria = r.json()["acceptance_criteria"]
+        assert len(criteria) == 2
+        assert all(c["id"] for c in criteria)
+        assert criteria[1]["test_cmd"] == "pytest -k x"
+        assert criteria[1]["done"] is True
+
+    @pytest.mark.asyncio
+    async def test_existing_ids_preserved(self, client, ticket):
+        existing_id = ticket.acceptance_criteria[0]["id"]
+        r = await client.put(f"/api/tickets/{ticket.id}/criteria", json=[
+            {"id": existing_id, "text": "kept id", "done": False},
+        ])
+        assert r.json()["acceptance_criteria"][0]["id"] == existing_id
+
+    @pytest.mark.asyncio
+    async def test_unknown_ticket_returns_404(self, client):
+        r = await client.put(f"/api/tickets/{uuid.uuid4()}/criteria", json=[])
+        assert r.status_code == 404
+
+
+class TestRefineTicket:
+    @pytest.mark.asyncio
+    async def test_refine_unknown_ticket_returns_404(self, client):
+        assert (await client.post(f"/api/tickets/{uuid.uuid4()}/refine")).status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_refine_without_title_or_description_returns_400(self, client):
+        async with TestSessionLocal() as db:
+            t = Ticket(id=str(uuid.uuid4()), workspace_id="ws1", source="custom",
+                       title="", description=None, status="open", body={},
+                       acceptance_criteria=[])
+            db.add(t)
+            await db.commit()
+            ticket_id = t.id
+        assert (await client.post(f"/api/tickets/{ticket_id}/refine")).status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_refine_without_llm_key_leaves_criteria_unchanged(
+        self, client, ticket, monkeypatch
+    ):
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "anthropic_api_key", None)
+        monkeypatch.setattr(settings, "openai_api_key", None)
+        before = [c["text"] for c in ticket.acceptance_criteria]
+        r = await client.post(f"/api/tickets/{ticket.id}/refine")
+        assert r.status_code == 200
+        assert [c["text"] for c in r.json()["acceptance_criteria"]] == before
+
+    @pytest.mark.asyncio
+    async def test_refine_merges_proposals_and_dedupes_by_text(
+        self, client, ticket, monkeypatch
+    ):
+        # The LLM call is mocked: _propose_criteria is the provider boundary and
+        # its real implementation needs a live API key. Shapes match production.
+        import app.api.routes.tickets as tickets_route
+
+        existing_text = ticket.acceptance_criteria[0]["text"]
+
+        async def fake_propose(title, description):
+            return [
+                tickets_route._make_criterion(existing_text, "echo dup"),
+                tickets_route._make_criterion("brand new criterion", "pytest -k new"),
+            ]
+
+        monkeypatch.setattr(tickets_route, "_propose_criteria", fake_propose)
+        r = await client.post(f"/api/tickets/{ticket.id}/refine")
+        assert r.status_code == 200
+        texts = [c["text"] for c in r.json()["acceptance_criteria"]]
+        assert texts.count(existing_text) == 1
+        assert "brand new criterion" in texts
