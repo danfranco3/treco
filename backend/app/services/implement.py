@@ -10,16 +10,49 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from app.core.constants import AgentStatus, EventType
+from app.core.constants import AgentStatus, EventType, TicketStatus
 from app.core.database import AsyncSessionLocal
+from app.core.pubsub import (
+    agent_channel,
+    agent_to_dict,
+    bus,
+    event_channel,
+    event_to_dict,
+    trace_channel,
+    trace_to_dict,
+)
 from app.models.agent import Agent
 from app.models.event import AgentEvent
 from app.models.ticket import Ticket
+from app.models.trace import Trace
 from app.models.workspace import Workspace
 
 # Maps agent_id → active subprocess so the permission_response endpoint
 # can write to stdin without needing to hold a reference elsewhere.
 _active_procs: dict[str, asyncio.subprocess.Process] = {}
+
+# Agents paused via POST /agents/{id}/pause — checked between loop iterations.
+_paused_agents: set[str] = set()
+
+
+def pause_agent(agent_id: str) -> None:
+    _paused_agents.add(agent_id)
+
+
+def resume_agent(agent_id: str) -> bool:
+    if agent_id in _paused_agents:
+        _paused_agents.discard(agent_id)
+        return True
+    return False
+
+
+def is_paused(agent_id: str) -> bool:
+    return agent_id in _paused_agents
+
+
+async def _wait_if_paused(agent_id: str) -> None:
+    while agent_id in _paused_agents:
+        await asyncio.sleep(0.5)
 
 
 async def _emit(
@@ -31,15 +64,17 @@ async def _emit(
 ) -> None:
     import uuid
     async with AsyncSessionLocal() as db:
-        db.add(AgentEvent(
+        event = AgentEvent(
             id=str(uuid.uuid4()),
             agent_id=agent_id,
             ticket_id=ticket_id,
             workspace_id=workspace_id,
             event_type=event_type,
             payload=payload,
-        ))
+        )
+        db.add(event)
         await db.commit()
+        bus.publish(event_channel(workspace_id), event_to_dict(event))
 
 
 async def _finish_agent(agent_id: str, status: str) -> None:
@@ -50,6 +85,70 @@ async def _finish_agent(agent_id: str, status: str) -> None:
             agent.status = status
             agent.current_ticket_id = None
             db.add(agent)
+            await db.commit()
+            bus.publish(agent_channel(agent.workspace_id), agent_to_dict(agent))
+
+
+async def _trace(
+    agent_id: str,
+    ticket_id: str,
+    workspace_id: str,
+    step_type: str,
+    *,
+    tool_name: str | None = None,
+    status: str = "ok",
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    duration_ms: int | None = None,
+    payload: dict[str, Any] | None = None,
+    parent_trace_id: str | None = None,
+    event_id: str | None = None,
+) -> str:
+    import uuid
+    async with AsyncSessionLocal() as db:
+        trace = Trace(
+            id=str(uuid.uuid4()),
+            agent_id=agent_id,
+            ticket_id=ticket_id,
+            parent_trace_id=parent_trace_id,
+            event_id=event_id,
+            step_type=step_type,
+            tool_name=tool_name,
+            status=status,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            duration_ms=duration_ms,
+            payload=payload or {},
+        )
+        db.add(trace)
+        await db.commit()
+        bus.publish(trace_channel(workspace_id), trace_to_dict(trace))
+    return trace.id
+
+
+async def _set_ticket_status(ticket_id: str, status: str) -> None:
+    async with AsyncSessionLocal() as db:
+        ticket = await db.get(Ticket, ticket_id)
+        if ticket:
+            ticket.status = status
+            db.add(ticket)
+            await db.commit()
+
+
+async def _cleanup_worktree(ticket: Ticket, workspace: Workspace | None, error: bool) -> None:
+    from app.core.config import settings
+    from app.services.worktree import remove_worktree
+
+    if not ticket.worktree_path or not workspace or not workspace.repo_path:
+        return
+    if error and settings.keep_worktree_on_error:
+        return
+    await remove_worktree(workspace.repo_path, ticket.worktree_path)
+    async with AsyncSessionLocal() as db:
+        t = await db.get(Ticket, ticket.id)
+        if t:
+            t.worktree_path = None
+            db.add(t)
             await db.commit()
 
 
@@ -84,7 +183,7 @@ async def _mark_criterion(
         ]
         t.acceptance_criteria = updated
         db.add(t)
-        db.add(AgentEvent(
+        event = AgentEvent(
             id=str(uuid.uuid4()),
             agent_id=agent_id,
             ticket_id=ticket.id,
@@ -92,8 +191,14 @@ async def _mark_criterion(
             event_type=EventType.CRITERION_CHECKED,
             criterion_id=criterion_id,
             payload={"file_path": file_path, "notes": notes},
-        ))
+        )
+        db.add(event)
         await db.commit()
+        bus.publish(event_channel(ticket.workspace_id or ""), event_to_dict(event))
+    await _trace(
+        agent_id, ticket.id, ticket.workspace_id or "", "criterion_check",
+        event_id=event.id, payload={"criterion_id": criterion_id},
+    )
 
 
 def _build_task(ticket: Ticket, system_prompt: str, method: str = "anthropic") -> str:
@@ -139,7 +244,11 @@ async def run_claude_code(
     skip_permissions: bool = True,
 ) -> None:
     ws_id = ticket.workspace_id or ""
-    repo_path = (workspace.repo_path if workspace and workspace.repo_path else None) or os.getcwd()
+    repo_path = (
+        ticket.worktree_path
+        or (workspace.repo_path if workspace and workspace.repo_path else None)
+        or os.getcwd()
+    )
     task = _build_task(ticket, system_prompt, method="claude_code")
 
     env = {
@@ -199,6 +308,7 @@ async def run_claude_code(
         async def _drain_stdout() -> None:
             assert proc.stdout
             async for raw in proc.stdout:
+                await _wait_if_paused(agent_id)
                 line = raw.decode(errors="replace").strip()
                 if not line:
                     continue
@@ -228,6 +338,10 @@ async def run_claude_code(
                             await _emit(agent_id, ticket.id, ws_id, EventType.LOG, {
                                 "message": f"→ {name}({brief})" if brief else f"→ {name}"
                             })
+                            await _trace(
+                                agent_id, ticket.id, ws_id, "tool_call",
+                                tool_name=name, payload={"brief": brief},
+                            )
 
                 # Streaming content block format (emitted when --verbose or newer SDK)
                 elif kind == "content_block_start":
@@ -257,6 +371,10 @@ async def run_claude_code(
                         await _emit(agent_id, ticket.id, ws_id, EventType.LOG, {
                             "message": f"→ {name}({brief})" if brief else f"→ {name}"
                         })
+                        await _trace(
+                            agent_id, ticket.id, ws_id, "tool_call",
+                            tool_name=name, payload={"brief": brief},
+                        )
                         _partial_tool.clear()
 
                 elif kind == "input_required":
@@ -266,12 +384,18 @@ async def run_claude_code(
                         "prompt": prompt,
                         "request_id": request_id,
                     })
+                    await _trace(
+                        agent_id, ticket.id, ws_id, "permission_gate",
+                        payload={"prompt": prompt},
+                    )
                     async with AsyncSessionLocal() as db:
                         agent = await db.get(Agent, agent_id)
                         if agent:
                             agent.status = AgentStatus.AWAITING_APPROVAL
                             db.add(agent)
                             await db.commit()
+                            bus.publish(agent_channel(agent.workspace_id), agent_to_dict(agent))
+                    await _set_ticket_status(ticket.id, TicketStatus.HITL_REVIEW)
 
                 elif kind == "result":
                     result_text = obj.get("result", "")
@@ -298,24 +422,51 @@ async def run_claude_code(
         except OSError:
             pass
 
+        from app.services.telemetry import record_ticket_final_metrics
         if proc.returncode == 0:
             await _emit(agent_id, ticket.id, ws_id, EventType.DONE, {"exit_code": 0})
+            from app.services.deviation import flag_incomplete_criteria
+            await record_ticket_final_metrics(ticket.id, ws_id, agent_id)
+            await flag_incomplete_criteria(agent_id, ticket.id, ws_id)
+            await _set_ticket_status(ticket.id, TicketStatus.DONE)
             await _finish_agent(agent_id, AgentStatus.IDLE)
+            await _cleanup_worktree(ticket, workspace, error=False)
         else:
             await _emit(agent_id, ticket.id, ws_id, EventType.ERROR, {"exit_code": proc.returncode})
+            from app.services.deviation import emit_deviation
+            await emit_deviation(
+                agent_id, ticket.id, ws_id, "process_exited",
+                f"claude CLI exited with code {proc.returncode}",
+                block=False,
+                context={"exit_code": proc.returncode},
+            )
+            await record_ticket_final_metrics(ticket.id, ws_id, agent_id)
+            await _set_ticket_status(ticket.id, TicketStatus.BLOCKED)
             await _finish_agent(agent_id, "error")
+            await _cleanup_worktree(ticket, workspace, error=True)
 
     except FileNotFoundError:
         await _emit(agent_id, ticket.id, ws_id, EventType.ERROR, {
             "message": "claude CLI not found — install with: npm i -g @anthropic-ai/claude-code"
         })
+        await _set_ticket_status(ticket.id, TicketStatus.BLOCKED)
         await _finish_agent(agent_id, "error")
+        await _cleanup_worktree(ticket, workspace, error=True)
     except Exception as e:
         await _emit(agent_id, ticket.id, ws_id, EventType.ERROR, {"message": str(e)})
+        await _set_ticket_status(ticket.id, TicketStatus.BLOCKED)
         await _finish_agent(agent_id, "error")
+        await _cleanup_worktree(ticket, workspace, error=True)
 
 
 # ── Anthropic tool-use loop ───────────────────────────────────────────────────
+
+# Runaway-loop ceiling — loop_utilization_ratio telemetry measures against this.
+_MAX_LOOPS = 30
+
+# Context-saturation denominator; the last turn's input_tokens approximates
+# the full accumulated context since messages are never trimmed.
+_CONTEXT_WINDOW_TOKENS = 200_000
 
 _TOOLS: list[dict[str, Any]] = [
     {
@@ -373,25 +524,86 @@ _TOOLS: list[dict[str, Any]] = [
 ]
 
 
+async def _load_workspace_tools(workspace_id: str | None) -> list[dict[str, Any]]:
+    """Registry tools exposed to the agent loop. High-risk tools are excluded;
+    only openapi tools are executable (python/javascript have no sandbox yet)."""
+    if not workspace_id:
+        return []
+    from sqlalchemy import select
+    from app.models.tool import Tool
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Tool).where(
+                Tool.workspace_id == workspace_id,
+                Tool.safety_flag.not_in(["high_risk_network", "high_risk_fs"]),
+            )
+        )
+        rows = result.scalars().all()
+    tools = []
+    for row in rows:
+        definition = row.definition or {}
+        if not definition.get("input_schema"):
+            continue
+        tools.append({
+            "name": row.name,
+            "description": definition.get("description", ""),
+            "input_schema": definition["input_schema"],
+            "_registry": {"kind": row.kind, "definition": definition},
+        })
+    return tools
+
+
+async def _exec_registry_tool(tool: dict[str, Any], inputs: dict[str, Any]) -> str:
+    registry = tool["_registry"]
+    if registry["kind"] != "openapi":
+        return f"Error: {registry['kind']} tools are not executable yet (no sandbox)"
+    import httpx
+    definition = registry["definition"]
+    url = definition.get("url")
+    if not url:
+        return "Error: openapi tool definition missing url"
+    method = str(definition.get("method", "GET")).upper()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.request(method, url, json=inputs if method != "GET" else None,
+                                    params=inputs if method == "GET" else None)
+        return resp.text[:2000]
+
+
+def _safe_path(repo_path: str, rel_path: str) -> str:
+    """Resolve a tool-supplied path, rejecting anything that escapes the repo."""
+    base = os.path.realpath(repo_path)
+    resolved = os.path.realpath(os.path.join(base, rel_path))
+    if resolved != base and not resolved.startswith(base + os.sep):
+        raise ValueError(f"Path escapes repository: {rel_path}")
+    return resolved
+
+
 async def _exec_tool(
     name: str,
     inputs: dict[str, Any],
     agent_id: str,
     ticket: Ticket,
     repo_path: str,
+    registry: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     ws_id = ticket.workspace_id or ""
     try:
         if name == "read_file":
-            path = os.path.join(repo_path, inputs["path"])
+            path = _safe_path(repo_path, inputs["path"])
             with open(path) as f:
                 return f.read()
 
         if name == "write_file":
-            path = os.path.join(repo_path, inputs["path"])
-            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            path = _safe_path(repo_path, inputs["path"])
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:
                 f.write(inputs["content"])
+            from app.services.telemetry import record_metric
+            await record_metric(
+                ws_id, "diff_churn_lines", inputs["content"].count("\n") + 1, "count",
+                ticket_id=ticket.id, agent_id=agent_id, dims={"path": inputs["path"]},
+            )
             return f"Written {inputs['path']}"
 
         if name == "run_command":
@@ -419,6 +631,9 @@ async def _exec_tool(
         if name == "finish":
             return inputs.get("summary", "Done")
 
+        if registry and name in registry:
+            return await _exec_registry_tool(registry[name], inputs)
+
         return f"Unknown tool: {name}"
 
     except Exception as e:
@@ -436,12 +651,17 @@ async def run_anthropic_agent(
     from app.core.config import settings
 
     ws_id = ticket.workspace_id or ""
-    repo_path = (workspace.repo_path if workspace and workspace.repo_path else None) or os.getcwd()
+    repo_path = (
+        ticket.worktree_path
+        or (workspace.repo_path if workspace and workspace.repo_path else None)
+        or os.getcwd()
+    )
 
     if not settings.anthropic_api_key:
         await _emit(agent_id, ticket.id, ws_id, EventType.ERROR, {
             "message": "ANTHROPIC_API_KEY not set"
         })
+        await _set_ticket_status(ticket.id, TicketStatus.BLOCKED)
         await _finish_agent(agent_id, "error")
         return
 
@@ -460,16 +680,33 @@ async def run_anthropic_agent(
         user_content = _build_task(ticket, "", method="anthropic")
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_content}]
 
-        for _ in range(30):
+        registry_tools = await _load_workspace_tools(ticket.workspace_id)
+        registry_by_name = {t["name"]: t for t in registry_tools}
+        api_tools = _TOOLS + [
+            {k: v for k, v in t.items() if k != "_registry"} for t in registry_tools
+        ]
+
+        loops_used = 0
+        last_context_tokens = 0
+        for _ in range(_MAX_LOOPS):
+            await _wait_if_paused(agent_id)
+            loops_used += 1
             response = await client.messages.create(
                 model=model or "claude-sonnet-5",
                 max_tokens=4096,
                 system=system,
-                tools=_TOOLS,  # type: ignore[arg-type]
+                tools=api_tools,  # type: ignore[arg-type]
                 messages=messages,  # type: ignore[arg-type]
             )
 
             messages.append({"role": "assistant", "content": response.content})
+            last_context_tokens = response.usage.input_tokens
+            turn_trace_id = await _trace(
+                agent_id, ticket.id, ws_id, "llm_turn",
+                tokens_in=response.usage.input_tokens,
+                tokens_out=response.usage.output_tokens,
+                payload={"stop_reason": response.stop_reason, "loop": loops_used},
+            )
 
             # Emit any text blocks as log events
             text = "\n".join(b.text for b in response.content if hasattr(b, "text") and b.text)
@@ -492,7 +729,16 @@ async def run_anthropic_agent(
                 await _emit(agent_id, ticket.id, ws_id, EventType.LOG, {
                     "message": f"→ {block.name}({brief})" if brief else f"→ {block.name}"
                 })
-                result = await _exec_tool(block.name, inp, agent_id, ticket, repo_path)
+                started = asyncio.get_event_loop().time()
+                result = await _exec_tool(block.name, inp, agent_id, ticket, repo_path, registry_by_name)
+                await _trace(
+                    agent_id, ticket.id, ws_id, "tool_call",
+                    tool_name=block.name,
+                    parent_trace_id=turn_trace_id,
+                    status="error" if result.startswith("Error:") else "ok",
+                    duration_ms=int((asyncio.get_event_loop().time() - started) * 1000),
+                    payload={"brief": brief},
+                )
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -505,9 +751,33 @@ async def run_anthropic_agent(
             if done:
                 break
 
-        await _emit(agent_id, ticket.id, ws_id, EventType.DONE, {})
+        await _emit(agent_id, ticket.id, ws_id, EventType.DONE, {"loops_used": loops_used})
+        from app.services.deviation import flag_incomplete_criteria
+        from app.services.telemetry import record_metric, record_ticket_final_metrics
+        await record_metric(
+            ws_id, "loop_count_per_ticket", loops_used, "count",
+            ticket_id=ticket.id, agent_id=agent_id,
+        )
+        await record_metric(
+            ws_id, "loop_utilization_ratio", loops_used / _MAX_LOOPS, "ratio",
+            ticket_id=ticket.id, agent_id=agent_id,
+            dims={"ceiling": _MAX_LOOPS, "runaway": loops_used >= _MAX_LOOPS},
+        )
+        if last_context_tokens:
+            await record_metric(
+                ws_id, "context_saturation_ratio",
+                last_context_tokens / _CONTEXT_WINDOW_TOKENS, "ratio",
+                ticket_id=ticket.id, agent_id=agent_id,
+                dims={"context_tokens": last_context_tokens, "window": _CONTEXT_WINDOW_TOKENS},
+            )
+        await record_ticket_final_metrics(ticket.id, ws_id, agent_id)
+        await flag_incomplete_criteria(agent_id, ticket.id, ws_id)
+        await _set_ticket_status(ticket.id, TicketStatus.DONE)
         await _finish_agent(agent_id, AgentStatus.IDLE)
+        await _cleanup_worktree(ticket, workspace, error=False)
 
     except Exception as e:
         await _emit(agent_id, ticket.id, ws_id, EventType.ERROR, {"message": str(e)})
+        await _set_ticket_status(ticket.id, TicketStatus.BLOCKED)
         await _finish_agent(agent_id, "error")
+        await _cleanup_worktree(ticket, workspace, error=True)

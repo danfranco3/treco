@@ -10,10 +10,20 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import AgentStatus, EventType
+from app.core.constants import AgentStatus, EventType, TicketStatus
 from app.core.database import get_db
+from app.core.pubsub import (
+    agent_channel,
+    agent_to_dict,
+    bus,
+    event_channel,
+    event_to_dict,
+    trace_channel,
+    trace_to_dict,
+)
 from app.models.event import AgentEvent
 from app.models.ticket import Ticket
+from app.models.trace import Trace
 from app.models.workspace import Workspace
 from app.services.auth import resolve_agent
 
@@ -45,9 +55,33 @@ def _workspace_events_query(workspace_id: str):
     return select(AgentEvent).where(AgentEvent.workspace_id == workspace_id)
 
 
+_SYNCED_STATUS_BY_EVENT: dict[str, str] = {
+    EventType.TICKET_STARTED: TicketStatus.IN_PROGRESS,
+    EventType.DONE: TicketStatus.DONE,
+    EventType.ERROR: TicketStatus.BLOCKED,
+    EventType.DEVIATION: TicketStatus.BLOCKED,
+    EventType.PERMISSION_REQUESTED: TicketStatus.HITL_REVIEW,
+}
+
+
+def _maybe_sync_tracker(req: "EventRequest") -> None:
+    """Fire-and-forget tracker sync on status transitions and PR opens.
+    The task no-ops for tickets without an external_ref."""
+    from app.services.sync import sync_ticket_to_tracker
+
+    if req.event_type == EventType.PR_OPENED:
+        asyncio.create_task(sync_ticket_to_tracker(
+            req.ticket_id, TicketStatus.IN_PROGRESS, pr_url=req.payload.get("url"),
+        ))
+    elif req.event_type in _SYNCED_STATUS_BY_EVENT:
+        asyncio.create_task(sync_ticket_to_tracker(
+            req.ticket_id, _SYNCED_STATUS_BY_EVENT[req.event_type],
+        ))
+
+
 class EventRequest(BaseModel):
     ticket_id: str = Field(..., description="ID of the ticket this event is associated with.", examples=["39a47894-f482-4bb2-906c-13227d2e500e"])
-    event_type: Literal["ticket_started", "criterion_checked", "criterion_failed", "pr_opened", "done", "error", "log", "heartbeat", "deviation", "criterion_verified"] = Field(
+    event_type: Literal["ticket_started", "criterion_checked", "criterion_failed", "pr_opened", "done", "error", "log", "heartbeat", "deviation", "criterion_verified", "permission_requested"] = Field(
         ...,
         description=(
             "Type of event. Key types:\n"
@@ -59,7 +93,8 @@ class EventRequest(BaseModel):
             "- `error` — agent hit an unrecoverable error\n"
             "- `log` — free-form agent log message\n"
             "- `heartbeat` — agent keepalive (updates `last_seen_at`)\n"
-            "- `deviation` — agent detected or was detected to be off-track"
+            "- `deviation` — agent off-track; sets ticket to `blocked`, agent to `blocked`\n"
+            "- `permission_requested` — agent awaits human approval; sets ticket to `hitl_review`"
         ),
         examples=["criterion_checked"],
     )
@@ -130,16 +165,27 @@ async def post_event(
         agent.current_ticket_id = req.ticket_id
         ticket = await _fetch_ticket(req.ticket_id, db)
         if ticket:
-            ticket.status = "in_progress"
+            ticket.status = TicketStatus.IN_PROGRESS
             db.add(ticket)
     elif req.event_type in (EventType.DONE, EventType.ERROR):
         agent.status = AgentStatus.IDLE if req.event_type == EventType.DONE else AgentStatus.ERROR
         agent.current_ticket_id = None
-        if req.event_type == EventType.DONE:
-            ticket = await _fetch_ticket(req.ticket_id, db)
-            if ticket:
-                ticket.status = "done"
-                db.add(ticket)
+        ticket = await _fetch_ticket(req.ticket_id, db)
+        if ticket:
+            ticket.status = TicketStatus.DONE if req.event_type == EventType.DONE else TicketStatus.BLOCKED
+            db.add(ticket)
+    elif req.event_type == EventType.DEVIATION:
+        agent.status = AgentStatus.BLOCKED
+        ticket = await _fetch_ticket(req.ticket_id, db)
+        if ticket:
+            ticket.status = TicketStatus.BLOCKED
+            db.add(ticket)
+    elif req.event_type == EventType.PERMISSION_REQUESTED:
+        agent.status = AgentStatus.AWAITING_APPROVAL
+        ticket = await _fetch_ticket(req.ticket_id, db)
+        if ticket:
+            ticket.status = TicketStatus.HITL_REVIEW
+            db.add(ticket)
     elif req.event_type == EventType.CRITERION_CHECKED and req.criterion_id:
         ticket = await _fetch_ticket(req.ticket_id, db)
         if ticket and ticket.acceptance_criteria:
@@ -156,6 +202,18 @@ async def post_event(
             db.add(ticket)
 
     await db.commit()
+    bus.publish(event_channel(agent.workspace_id), event_to_dict(event))
+    bus.publish(agent_channel(agent.workspace_id), agent_to_dict(agent))
+
+    _maybe_sync_tracker(req)
+
+    from app.services.deviation import flag_incomplete_criteria, maybe_flag_token_spike
+    from app.services.telemetry import record_ticket_final_metrics
+    asyncio.create_task(maybe_flag_token_spike(event))
+    if req.event_type == EventType.DONE:
+        asyncio.create_task(flag_incomplete_criteria(agent.id, req.ticket_id, agent.workspace_id))
+    if req.event_type in (EventType.DONE, EventType.ERROR):
+        asyncio.create_task(record_ticket_final_metrics(req.ticket_id, agent.workspace_id, agent.id))
 
     if req.event_type == EventType.CRITERION_CHECKED and req.criterion_id:
         ticket = await _fetch_ticket(req.ticket_id, db)
@@ -163,8 +221,11 @@ async def post_event(
             for c in ticket.acceptance_criteria or []:
                 if c.get("id") == req.criterion_id and c.get("test_cmd"):
                     workspace = await db.get(Workspace, agent.workspace_id)
-                    if workspace and workspace.repo_path:
-                        passed, evidence = await _run_test(c["test_cmd"], workspace.repo_path)
+                    test_cwd = ticket.worktree_path or (workspace.repo_path if workspace else None)
+                    if test_cwd:
+                        started = asyncio.get_event_loop().time()
+                        passed, evidence = await _run_test(c["test_cmd"], test_cwd)
+                        duration_ms = int((asyncio.get_event_loop().time() - started) * 1000)
                         updated = [dict(cr) for cr in ticket.acceptance_criteria]
                         for cr in updated:
                             if cr.get("id") == req.criterion_id:
@@ -173,7 +234,7 @@ async def post_event(
                                 break
                         ticket.acceptance_criteria = updated
                         db.add(ticket)
-                        db.add(AgentEvent(
+                        verified_event = AgentEvent(
                             id=str(uuid.uuid4()),
                             agent_id=agent.id,
                             ticket_id=req.ticket_id,
@@ -181,8 +242,22 @@ async def post_event(
                             event_type=EventType.CRITERION_VERIFIED,
                             criterion_id=req.criterion_id,
                             payload={"passed": passed, "evidence": evidence[:500]},
-                        ))
+                        )
+                        db.add(verified_event)
+                        test_trace = Trace(
+                            id=str(uuid.uuid4()),
+                            agent_id=agent.id,
+                            ticket_id=req.ticket_id,
+                            event_id=verified_event.id,
+                            step_type="test_run",
+                            status="ok" if passed else "error",
+                            duration_ms=duration_ms,
+                            payload={"test_cmd": c["test_cmd"], "passed": passed},
+                        )
+                        db.add(test_trace)
                         await db.commit()
+                        bus.publish(event_channel(agent.workspace_id), event_to_dict(verified_event))
+                        bus.publish(trace_channel(agent.workspace_id), trace_to_dict(test_trace))
                     break
 
     return {"id": event.id}
@@ -265,22 +340,6 @@ async def list_workspace_events(
     return result.scalars().all()
 
 
-def _event_to_dict(event: AgentEvent) -> dict[str, Any]:
-    return {
-        "id": event.id,
-        "agent_id": event.agent_id,
-        "ticket_id": event.ticket_id,
-        "workspace_id": event.workspace_id,
-        "event_type": event.event_type,
-        "criterion_id": event.criterion_id,
-        "tokens_in": event.tokens_in,
-        "tokens_out": event.tokens_out,
-        "model": event.model,
-        "payload": event.payload,
-        "created_at": event.created_at.isoformat(),
-    }
-
-
 @router.get(
     "/stream",
     summary="SSE stream of workspace events",
@@ -293,34 +352,30 @@ def _event_to_dict(event: AgentEvent) -> dict[str, Any]:
 )
 async def event_stream(workspace_id: str, db: AsyncSession = Depends(get_db)):
     async def generator():
-        result = await db.execute(
-            _workspace_events_query(workspace_id)
-            .order_by(AgentEvent.created_at.desc())
-            .limit(50)
-        )
-        bootstrap = list(reversed(result.scalars().all()))
-        for event in bootstrap:
-            yield {"data": json.dumps(_event_to_dict(event))}
+        # Subscribe before the bootstrap query so nothing published in
+        # between is lost; dedupe against bootstrapped ids.
+        with bus.subscribe(event_channel(workspace_id)) as sub:
+            result = await db.execute(
+                _workspace_events_query(workspace_id)
+                .order_by(AgentEvent.created_at.desc())
+                .limit(50)
+            )
+            bootstrap = list(reversed(result.scalars().all()))
+            seen = {event.id for event in bootstrap}
+            for event in bootstrap:
+                yield {"data": json.dumps(event_to_dict(event))}
 
-        last_created = bootstrap[-1].created_at if bootstrap else None
-        tick = 0
-
-        while True:
-            try:
-                await asyncio.sleep(0.5)
-            except asyncio.CancelledError:
-                return
-
-            tick += 1
-            if tick % 30 == 0:
-                yield {"comment": "keepalive"}
-
-            q = _workspace_events_query(workspace_id).order_by(AgentEvent.created_at)
-            if last_created is not None:
-                q = q.where(AgentEvent.created_at > last_created)
-            result = await db.execute(q)
-            for event in result.scalars().all():
-                yield {"data": json.dumps(_event_to_dict(event))}
-                last_created = event.created_at
+            while True:
+                try:
+                    msg = await sub.get(timeout=15.0)
+                except asyncio.CancelledError:
+                    return
+                if msg is None:
+                    yield {"comment": "keepalive"}
+                    continue
+                if msg["id"] in seen:
+                    seen.discard(msg["id"])
+                    continue
+                yield {"data": json.dumps(msg)}
 
     return EventSourceResponse(generator())

@@ -34,5 +34,12 @@ class Ticket(Base):
     # LLM-extracted acceptance criteria: [{"id": str, "text": str, "done": bool}]
     acceptance_criteria: Mapped[list[dict[str, Any]]] = mapped_column(AnyJSON, default=list)
 
+    # Git isolation — set by WorktreeManager when an agent run starts
+    git_branch: Mapped[str | None] = mapped_column(String, nullable=True)
+    worktree_path: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    # External tracker link: {"provider", "issue_key", "issue_url", "last_synced_at", "sync_status", "sync_error"}
+    external_ref: Mapped[dict[str, Any] | None] = mapped_column(AnyJSON, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

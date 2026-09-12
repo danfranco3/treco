@@ -1,4 +1,5 @@
 .env
+.mcp.json
 *.db
 __pycache__/
 *.pyc
@@ -19,3 +20,10 @@ frontend/out/
 .autopilot/
 launch.sh
 treco.desktop
+*.log
+coverage/
+.coverage
+coverage.json
+*.pem
+*.key
+.DS_Store

@@ -16,13 +16,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import httpx
-from sqlalchemy import select
 
 from app.core.database import AsyncSessionLocal, init_db
-from app.models.user import User
-from app.models.user_workspace import UserWorkspace
 from app.models.workspace import Workspace
-from app.services.auth import create_jwt
 
 TICKETS = [
     {
@@ -36,8 +32,6 @@ Users should be able to sign in with their GitHub account.
 - [ ] Issue JWT on successful auth
 - [ ] Handle token expiry and refresh
         """,
-        "source": "github",
-        "source_id": "42",
     },
     {
         "title": "Add rate limiting to public API endpoints",
@@ -50,8 +44,6 @@ Prevent abuse on unauthenticated endpoints.
 - [ ] Return 429 with Retry-After header
 - [ ] Log rate limit hits to monitoring
         """,
-        "source": "linear",
-        "source_id": "ENG-88",
     },
     {
         "title": "Ticket detail page — criteria attribution",
@@ -63,8 +55,6 @@ When an agent checks a criterion, show which agent did it and when.
 - [ ] Show relative timestamp (e.g. '3m ago')
 - [ ] Handle case where agent is deleted after event
         """,
-        "source": "jira",
-        "source_id": "TRECO-14",
     },
     {
         "title": "Export ticket progress as CSV",
@@ -75,8 +65,6 @@ Teams want to export per-ticket metrics to share in standups.
 - [ ] Columns: ticket_id, title, criteria_total, criteria_done, tokens_in, tokens_out, est_cost, last_agent
 - [ ] Trigger download from frontend
         """,
-        "source": "custom",
-        "source_id": None,
     },
     {
         "title": "WebSocket / SSE real-time event stream",
@@ -89,8 +77,6 @@ Replace SWR polling with server-sent events for lower latency.
 - [ ] Graceful reconnect on connection drop
 - [ ] Fallback to polling if SSE not supported
         """,
-        "source": "github",
-        "source_id": "61",
     },
 ]
 
@@ -110,80 +96,60 @@ LOG_MESSAGES = [
     "Addressing review feedback",
 ]
 
-# Stable ID so re-runs don't create duplicate seed users
-_SEED_USER_ID = "00000000-seed-demo-user-000000000000"
-_SEED_GITHUB_ID = "seed-demo-0"
-
-
-async def _bootstrap(workspace_id: str) -> str:
-    """Creates demo user + workspace + membership directly in DB. Returns JWT."""
+async def _bootstrap(workspace_id: str) -> None:
+    """Creates demo workspace directly in DB, if it doesn't exist yet."""
     await init_db()
     async with AsyncSessionLocal() as db:
-        user = await db.get(User, _SEED_USER_ID)
-        if user is None:
-            user = User(
-                id=_SEED_USER_ID,
-                github_id=_SEED_GITHUB_ID,
-                login="demo-seed",
-                avatar_url=None,
-            )
-            db.add(user)
-            await db.flush()
-
         workspace = await db.get(Workspace, workspace_id)
         if workspace is None:
-            workspace = Workspace(id=workspace_id, name="Demo Workspace", repo_path=None)
-            db.add(workspace)
-            await db.flush()
-
-        result = await db.execute(
-            select(UserWorkspace).where(
-                UserWorkspace.user_id == _SEED_USER_ID,
-                UserWorkspace.workspace_id == workspace_id,
-            )
-        )
-        if result.scalar_one_or_none() is None:
-            db.add(UserWorkspace(
-                user_id=_SEED_USER_ID,
-                workspace_id=workspace_id,
-                role="owner",
-            ))
-
-        await db.commit()
-
-    return create_jwt(_SEED_USER_ID)
+            db.add(Workspace(id=workspace_id, name="Demo Workspace", repo_path=None))
+            await db.commit()
 
 
 class Seeder:
-    def __init__(self, base_url: str, workspace_id: str, token: str):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, workspace_id: str, base_url: str | None = None):
+        self.base_url = base_url.rstrip("/") if base_url else None
         self.workspace_id = workspace_id
-        self.auth_headers = {"Authorization": f"Bearer {token}"}
         self.agent_keys: dict[str, str] = {}
         self.ticket_ids: list[str] = []
 
-    async def run(self):
-        async with httpx.AsyncClient(base_url=self.base_url, timeout=30.0) as client:
+    async def run(self, client: httpx.AsyncClient | None = None):
+        if client is not None:
             self.client = client
-            print("Creating agents...")
-            for name in AGENTS:
-                await self._create_agent(name)
+            await self._seed()
+            return
 
-            print("Creating tickets...")
-            for t in TICKETS:
-                await self._create_ticket(t)
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=30.0) as owned_client:
+            self.client = owned_client
+            await self._seed()
 
-            print("Simulating agent activity...")
-            await self._simulate_activity()
+    async def _seed(self):
+        existing = await self.client.get(
+            "/api/tickets", params={"workspace_id": self.workspace_id}
+        )
+        existing.raise_for_status()
+        if existing.json():
+            print(f"Workspace '{self.workspace_id}' already has tickets — skipping seed.")
+            return
+
+        print("Creating agents...")
+        for name in AGENTS:
+            await self._create_agent(name)
+
+        print("Creating tickets...")
+        for t in TICKETS:
+            await self._create_ticket(t)
+
+        print("Simulating agent activity...")
+        await self._simulate_activity()
 
         print(f"\nSeeded {len(self.agent_keys)} agents and {len(self.ticket_ids)} tickets.")
-        print(f"Open http://localhost:3000 — workspace: {self.workspace_id}")
+        print(f"Workspace: {self.workspace_id}")
 
     async def _create_agent(self, name: str):
         r = await self.client.post(
             "/api/agents",
             json={"workspace_id": self.workspace_id, "name": name},
-            headers=self.auth_headers,
         )
         if r.status_code == 409:
             print(f"  agent '{name}' already exists, skipping")
@@ -194,49 +160,14 @@ class Seeder:
         print(f"  agent '{name}' → key {data['api_key'][:20]}...")
 
     async def _create_ticket(self, spec: dict):
-        source = spec["source"]
-        sid = spec["source_id"] or ""
-
-        if source != "custom":
-            if source == "jira":
-                raw: dict = {
-                    "key": sid,
-                    "fields": {
-                        "summary": spec["title"],
-                        "description": spec["description"],
-                        "status": {"name": "In Progress"},
-                    },
-                }
-            elif source == "linear":
-                raw = {
-                    "identifier": sid,
-                    "title": spec["title"],
-                    "description": spec["description"],
-                    "state": {"name": "In Progress"},
-                }
-            else:  # github
-                raw = {
-                    "number": int(sid) if sid.isdigit() else 0,
-                    "title": spec["title"],
-                    "state": "open",
-                    "body": spec["description"],
-                }
-            r = await self.client.post(
-                "/api/tickets/import",
-                json={"source": source, "workspace_id": self.workspace_id, "raw": raw},
-                headers=self.auth_headers,
-            )
-        else:
-            r = await self.client.post(
-                "/api/tickets",
-                json={
-                    "workspace_id": self.workspace_id,
-                    "title": spec["title"],
-                    "description": spec["description"],
-                },
-                headers=self.auth_headers,
-            )
-
+        r = await self.client.post(
+            "/api/tickets",
+            json={
+                "workspace_id": self.workspace_id,
+                "title": spec["title"],
+                "description": spec["description"],
+            },
+        )
         r.raise_for_status()
         ticket_id = r.json()["id"]
         self.ticket_ids.append(ticket_id)
@@ -322,16 +253,28 @@ class Seeder:
             await emit("done", tokens_in=total_in, tokens_out=total_out)
 
 
+async def seed_in_process(app, workspace_id: str = "demo") -> None:
+    """Seeds demo data via ASGI transport — no network listener required.
+
+    Called from the app's lifespan when DEMO_MODE is on, so seed data only
+    ever exists on a demo deployment, never a real one.
+    """
+    await _bootstrap(workspace_id)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://demo-seed") as client:
+        await Seeder(workspace_id).run(client=client)
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://localhost:8001")
     parser.add_argument("--workspace", default="demo")
     args = parser.parse_args()
 
-    print("Bootstrapping demo user + workspace in DB...")
-    token = await _bootstrap(args.workspace)
+    print("Bootstrapping demo workspace in DB...")
+    await _bootstrap(args.workspace)
 
-    await Seeder(args.url, args.workspace, token).run()
+    await Seeder(args.workspace, base_url=args.url).run()
 
 
 if __name__ == "__main__":

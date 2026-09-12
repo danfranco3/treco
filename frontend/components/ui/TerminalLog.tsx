@@ -64,6 +64,7 @@ export function TerminalLog({ events, agentNames = {}, maxLines = 200 }: Termina
         return (
           <div
             key={ev.id}
+            id={`evt-${ev.id}`}
             className={isNewest ? "terminal-line-enter" : undefined}
           >
             <span className="text-text-muted select-none">{formatTime(ev.created_at)} </span>

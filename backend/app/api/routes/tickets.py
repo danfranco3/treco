@@ -5,12 +5,13 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.constants import AgentStatus, EventType
+from app.core.constants import AgentStatus, EventType, TicketStatus
 from app.core.database import get_db, get_or_404
+from app.core.pubsub import agent_channel, agent_to_dict, bus, event_channel, event_to_dict
 from app.models.agent import Agent
 from app.models.event import AgentEvent
 from app.models.ticket import Ticket
@@ -68,6 +69,9 @@ class TicketResponse(BaseModel):
     status: str
     acceptance_criteria: list[dict]
     body: dict
+    git_branch: str | None = None
+    worktree_path: str | None = None
+    external_ref: dict | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -188,6 +192,7 @@ class ImplementRequest(BaseModel):
     model: str = Field(default="claude-sonnet-5")
     system_prompt: str = Field(default="")
     skip_permissions: bool = Field(default=True)
+    execution_mode: Literal["local", "cloud"] = Field(default="local")
 
 
 class ImplementResponse(BaseModel):
@@ -202,12 +207,45 @@ async def implement_ticket(
     db: AsyncSession = Depends(get_db),
 ):
     from app.services.implement import run_anthropic_agent, run_claude_code
+    from app.services.worktree import create_worktree, is_git_repo
 
     ticket = await get_or_404(db, Ticket, ticket_id)
+
+    if req.execution_mode == "cloud":
+        if settings.tier == "free":
+            raise HTTPException(
+                status_code=402,
+                detail="Cloud offload requires a Pro plan. Set TRECO_TIER=pro to enable.",
+            )
+        raise HTTPException(status_code=501, detail="Cloud offload provider not configured")
+
+    active = await db.execute(
+        select(func.count(Agent.id)).where(
+            Agent.workspace_id == ticket.workspace_id,
+            Agent.status == AgentStatus.WORKING,
+            Agent.execution_mode == "local",
+        )
+    )
+    if (active.scalar() or 0) >= settings.max_parallel_agents:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Concurrency limit reached ({settings.max_parallel_agents} parallel agent(s) "
+                f"on the {settings.tier} tier). Wait for the running agent or raise MAX_PARALLEL_AGENTS."
+            ),
+        )
 
     workspace: Workspace | None = None
     if ticket.workspace_id:
         workspace = await db.get(Workspace, ticket.workspace_id)
+
+    if workspace and workspace.repo_path and await is_git_repo(workspace.repo_path):
+        worktree_path, git_branch = await create_worktree(workspace.repo_path, ticket_id)
+        ticket.worktree_path = worktree_path
+        ticket.git_branch = git_branch
+
+    ticket.status = TicketStatus.IN_PROGRESS
+    db.add(ticket)
 
     raw_key, key_hash = generate_api_key()
     agent_name = f"impl-{ticket_id[:8]}"
@@ -218,18 +256,23 @@ async def implement_ticket(
         api_key_hash=key_hash,
         status=AgentStatus.WORKING,
         current_ticket_id=ticket_id,
+        worktree_id=ticket_id[:8] if ticket.worktree_path else None,
+        execution_mode=req.execution_mode,
     )
     db.add(agent)
-    db.add(AgentEvent(
+    started_event = AgentEvent(
         id=str(uuid.uuid4()),
         agent_id=agent.id,
         ticket_id=ticket_id,
         workspace_id=ticket.workspace_id or "",
         event_type=EventType.TICKET_STARTED,
         payload={"method": req.method, "model": req.model},
-    ))
+    )
+    db.add(started_event)
     await db.commit()
     await db.refresh(agent)
+    bus.publish(event_channel(ticket.workspace_id or ""), event_to_dict(started_event))
+    bus.publish(agent_channel(ticket.workspace_id or ""), agent_to_dict(agent))
 
     runner = run_claude_code if req.method == "claude_code" else run_anthropic_agent
     kwargs: dict[str, Any] = {"skip_permissions": req.skip_permissions} if req.method == "claude_code" else {}

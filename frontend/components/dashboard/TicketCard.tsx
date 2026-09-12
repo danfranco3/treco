@@ -10,6 +10,7 @@ interface TicketCardProps {
   ticket: Ticket;
   agent: Agent | null;
   lastEvent: AgentEvent | null;
+  onContextMenu?: (e: React.MouseEvent, ticket: Ticket) => void;
 }
 
 function lastMessage(event: AgentEvent | null): string | null {
@@ -23,7 +24,7 @@ function timeAgo(event: AgentEvent | null, ticket: Ticket): string {
   return iso ? formatRelativeTime(iso) : "";
 }
 
-export function TicketCard({ ticket, agent, lastEvent }: TicketCardProps) {
+export function TicketCard({ ticket, agent, lastEvent, onContextMenu }: TicketCardProps) {
   const router = useRouter();
   const [, forceUpdate] = useState(0);
 
@@ -46,6 +47,7 @@ export function TicketCard({ ticket, agent, lastEvent }: TicketCardProps) {
       tabIndex={0}
       onClick={() => router.push(`/tickets/${ticket.id}`)}
       onKeyDown={(e) => e.key === "Enter" && router.push(`/tickets/${ticket.id}`)}
+      onContextMenu={(e) => onContextMenu?.(e, ticket)}
       className={cn(
         "bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3 flex flex-col gap-2",
         "cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--green)]",

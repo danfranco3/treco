@@ -9,6 +9,23 @@ export interface Criterion {
   notes: string | null;
 }
 
+export type TicketStatus =
+  | "backlog"
+  | "open"
+  | "in_progress"
+  | "hitl_review"
+  | "blocked"
+  | "done";
+
+export interface ExternalRef {
+  provider: "jira" | "linear";
+  issue_key: string;
+  issue_url?: string;
+  last_synced_at?: string;
+  sync_status?: "ok" | "error";
+  sync_error?: string | null;
+}
+
 export interface Ticket {
   id: string;
   workspace_id: string | null;
@@ -16,9 +33,12 @@ export interface Ticket {
   source_id: string | null;
   title: string;
   description: string | null;
-  status: string;
+  status: TicketStatus;
   acceptance_criteria: Criterion[];
   body: Record<string, unknown>;
+  git_branch?: string | null;
+  worktree_path?: string | null;
+  external_ref?: ExternalRef | null;
 }
 
 export interface Workspace {
@@ -31,7 +51,7 @@ export interface Workspace {
 export interface Agent {
   id: string;
   name: string;
-  status: "idle" | "working" | "awaiting_approval" | "done" | "error";
+  status: "idle" | "working" | "awaiting_approval" | "done" | "error" | "blocked" | "cloud_offloaded";
   current_ticket_id: string | null;
   workspace_id: string;
 }
@@ -83,6 +103,47 @@ export interface LogPayload {
 
 export function getPayload<T>(event: AgentEvent): T {
   return event.payload as T;
+}
+
+export type TraceStepType =
+  | "tool_call"
+  | "llm_turn"
+  | "test_run"
+  | "criterion_check"
+  | "permission_gate";
+
+export interface TraceNode {
+  id: string;
+  agent_id: string;
+  ticket_id: string;
+  parent_trace_id: string | null;
+  event_id: string | null;
+  step_type: TraceStepType;
+  tool_name: string | null;
+  status: "running" | "ok" | "error" | "skipped";
+  tokens_in: number;
+  tokens_out: number;
+  duration_ms: number | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+  children: TraceNode[];
+}
+
+export interface MetricRow {
+  id: string;
+  workspace_id: string;
+  ticket_id: string | null;
+  agent_id: string | null;
+  metric: string;
+  value: number;
+  unit: "tokens" | "usd" | "ms" | "count" | "ratio";
+  dims: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface TierInfo {
+  tier: "free" | "pro" | "team";
+  max_parallel_agents: number;
 }
 
 export interface CostSummary {

@@ -123,6 +123,15 @@ async def post_json(base_url: str, path: str, body: dict) -> dict:
         return r.json()
 
 
+async def get_ticket(base_url: str, ticket_id: str) -> dict | None:
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        r = await client.get(f"{base_url}/api/tickets/{ticket_id}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
+
 # ── hooks ─────────────────────────────────────────────────────────────────────
 
 def _install_hooks() -> None:
@@ -497,13 +506,11 @@ def _run_post_tool_use():
     s["cache_write_tokens"] = s.get("cache_write_tokens", 0) + cache_write
     save_session(s)
 
-    if tokens_in > 0 or tokens_out > 0:
-        cfg = load_config()
-        api_key = cfg.get("api_key") or os.environ.get("TRECO_API_KEY", "")
-        base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8001")
-        if not api_key:
-            return
+    cfg = load_config()
+    api_key = cfg.get("api_key") or os.environ.get("TRECO_API_KEY", "")
+    base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8001")
 
+    if (tokens_in > 0 or tokens_out > 0) and api_key:
         tool_name = payload.get("tool_name", "")
         tool_input = payload.get("tool_input", {}) or {}
         file_path = tool_input.get("file_path")
@@ -524,9 +531,28 @@ def _run_post_tool_use():
             },
         ))
 
+    if payload.get("tool_name") in ("Edit", "Write"):
+        ticket = asyncio.run(get_ticket(base_url, s["ticket_id"]))
+        unmet = [c for c in (ticket or {}).get("acceptance_criteria") or [] if not c.get("done")]
+        if unmet:
+            ids = ", ".join(c["id"][:8] for c in unmet[:5])
+            print(json.dumps({
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": (
+                        f"Reminder: ticket {s['ticket_id']} has unfinished acceptance "
+                        f"criteria ({ids}). If this edit satisfied one, run "
+                        f"`treco check <criterion_id>` now — don't wait until the end."
+                    ),
+                }
+            }))
+
 
 def cmd_hook_post_tool_use():
     _safe_hook(_run_post_tool_use)
+
+
+MAX_STOP_NUDGES = 3
 
 
 def _run_stop():
@@ -540,24 +566,51 @@ def _run_stop():
         return
 
     usage = payload.get("usage") or {}
-    final_in = s.get("tokens_in", 0) + max(
+    s["tokens_in"] = s.get("tokens_in", 0) + max(
         usage.get("input_tokens", 0) - usage.get("cache_read_input_tokens", 0),
         0,
     )
-    final_out = s.get("tokens_out", 0) + usage.get("output_tokens", 0)
+    s["tokens_out"] = s.get("tokens_out", 0) + usage.get("output_tokens", 0)
 
     cfg = load_config()
-    api_key = cfg.get("api_key") or os.environ.get("TRECO_API_KEY", "")
     base_url = cfg.get("base_url") or os.environ.get("TRECO_URL", "http://localhost:8001")
 
-    if api_key:
-        asyncio.run(post_event(
-            {"api_key": api_key, "base_url": base_url},
-            s["ticket_id"], "done",
-            tokens_in=final_in,
-            tokens_out=final_out,
-        ))
-    clear_session()
+    ticket = asyncio.run(get_ticket(base_url, s["ticket_id"]))
+    if ticket is None:
+        save_session(s)
+        return
+
+    if ticket.get("status") == "done":
+        clear_session()
+        return
+
+    criteria = ticket.get("acceptance_criteria") or []
+    unmet = [c for c in criteria if not c.get("done")]
+    if len(unmet) < s.get("last_unmet_count", len(unmet)):
+        s["stop_nudge_count"] = 0
+    s["last_unmet_count"] = len(unmet)
+    nudges = s.get("stop_nudge_count", 0)
+
+    if criteria and nudges < MAX_STOP_NUDGES:
+        s["stop_nudge_count"] = nudges + 1
+        save_session(s)
+        if unmet:
+            ids = ", ".join(c["id"][:8] for c in unmet[:5])
+            reason = (
+                f"Ticket {s['ticket_id']} still has {len(unmet)} unfinished acceptance "
+                f"criteria ({ids}). For each one you actually finished, run "
+                f"`treco check <criterion_id>` before stopping. If none of them are "
+                f"done yet, keep working."
+            )
+        else:
+            reason = (
+                f"All acceptance criteria for ticket {s['ticket_id']} are checked off. "
+                f"Run `treco done` to close it out before stopping."
+            )
+        print(json.dumps({"decision": "block", "reason": reason}))
+        return
+
+    save_session(s)
 
 
 def cmd_hook_stop():

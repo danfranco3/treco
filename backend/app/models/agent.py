@@ -23,5 +23,9 @@ class Agent(Base):
     # PID of the spawned subprocess while status == "working"
     pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    worktree_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    execution_mode: Mapped[str] = mapped_column(String, default="local")  # local | cloud
+    cloud_session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -1,10 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { useAgents, useTickets, useWorkspaceEvents } from "@/lib/hooks";
 import { useWorkspaceStream, useAgentStream } from "@/lib/hooks";
 import { BoardColumn } from "@/components/dashboard/BoardColumn";
 import { TicketCard } from "@/components/dashboard/TicketCard";
+import { TicketContextMenu } from "@/components/tickets/TicketContextMenu";
+import { deleteTicket, implementTicket } from "@/lib/api";
+import { loadImplSettings } from "@/lib/impl-settings";
 import { criteriaProgress } from "@/lib/utils";
 import type { Agent, AgentEvent, Ticket } from "@/lib/types";
 
@@ -31,13 +35,31 @@ const DONE_WINDOW_MS = 24 * 60 * 60 * 1000;
 export default function DashboardPage() {
   const { workspaceId } = useWorkspace();
 
-  const { data: tickets = [] } = useTickets(workspaceId);
+  const { data: tickets = [], mutate } = useTickets(workspaceId);
   const { data: agents  = [] } = useAgents(workspaceId);
   const { data: events  = [] } = useWorkspaceEvents(workspaceId);
 
   // live SSE pushes
   useWorkspaceStream(workspaceId);
   useAgentStream(workspaceId);
+
+  const [menu, setMenu] = useState<{ x: number; y: number; ticket: Ticket } | null>(null);
+
+  function handleContextMenu(e: React.MouseEvent, ticket: Ticket) {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, ticket });
+  }
+
+  async function handleDelete(ticket: Ticket) {
+    await deleteTicket(ticket.id);
+    mutate();
+  }
+
+  async function handleImplement(ticket: Ticket) {
+    const s = loadImplSettings();
+    await implementTicket(ticket.id, { method: "claude_code", model: s.model, system_prompt: s.system_prompt, skip_permissions: s.skip_permissions });
+    mutate();
+  }
 
   // agent keyed by current_ticket_id
   const agentByTicket: Record<string, Agent> = {};
@@ -54,17 +76,15 @@ export default function DashboardPage() {
   const now = Date.now();
 
   for (const t of tickets) {
-    const agent = agentByTicket[t.id] ?? null;
-
-    if (agent?.status === "working") {
+    if (t.status === "in_progress") {
       inProgress.push(t);
-    } else if (agent?.status === "awaiting_approval" || agent?.status === "error") {
+    } else if (t.status === "blocked" || t.status === "hitl_review") {
       blocked.push(t);
     } else if (t.status === "done") {
       const latest = latestEventTime(events, t.id);
       if (latest && now - latest < DONE_WINDOW_MS) done.push(t);
     } else {
-      // open, no active agent
+      // backlog / open
       todo.push(t);
     }
   }
@@ -103,11 +123,22 @@ export default function DashboardPage() {
                 ticket={t}
                 agent={agentByTicket[t.id] ?? null}
                 lastEvent={lastLogEvent(events, t.id)}
+                onContextMenu={handleContextMenu}
               />
             ))}
           </BoardColumn>
         ))}
       </div>
+
+      {menu && (
+        <TicketContextMenu
+          x={menu.x}
+          y={menu.y}
+          onImplement={() => handleImplement(menu.ticket)}
+          onDelete={() => handleDelete(menu.ticket)}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   );
 }

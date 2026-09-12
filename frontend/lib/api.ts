@@ -1,4 +1,4 @@
-import type { Agent, AgentEvent, CostSummary, Ticket, Workspace } from "./types";
+import type { Agent, AgentEvent, CostSummary, MetricRow, Ticket, TierInfo, TraceNode, Workspace } from "./types";
 
 const BASE = "/api";
 
@@ -120,6 +120,23 @@ export const fetchTicketCost = (ticketId: string): Promise<CostSummary> =>
 export const fetchWorkspaceEvents = (workspaceId: string, limit = 100): Promise<AgentEvent[]> =>
   get(`/events/?workspace_id=${workspaceId}&limit=${limit}`);
 
+
+export const fetchTicketTraces = (ticketId: string): Promise<TraceNode[]> =>
+  get(`/traces/ticket/${ticketId}`);
+
+export const fetchTicketTelemetry = (ticketId: string): Promise<MetricRow[]> =>
+  get(`/telemetry/ticket/${ticketId}`);
+
+export const fetchWorkspaceTelemetry = (workspaceId: string): Promise<MetricRow[]> =>
+  get(`/telemetry/workspace/${workspaceId}/summary`);
+
+export const fetchTier = (): Promise<TierInfo> => get("/meta/tier");
+
+export const pauseAgent = (agentId: string): Promise<Agent> =>
+  post(`/agents/${agentId}/pause`, {});
+
+export const resumeAgent = (agentId: string): Promise<Agent> =>
+  post(`/agents/${agentId}/resume`, {});
 
 export const fetchWorkspaces = (): Promise<Workspace[]> => get("/workspaces");
 
