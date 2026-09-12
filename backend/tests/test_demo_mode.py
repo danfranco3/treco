@@ -3,7 +3,6 @@ never hand-listed, so newly added routes are covered automatically."""
 import re
 
 import pytest
-from fastapi.routing import APIRoute
 
 from app.core.config import settings
 from app.main import app
@@ -12,13 +11,13 @@ MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 def _mutating_routes() -> list[tuple[str, str]]:
+    # Enumerated via the OpenAPI schema, not router internals — route class
+    # layout changes across FastAPI/Starlette versions, the schema does not.
     routes: set[tuple[str, str]] = set()
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
-        for method in route.methods & MUTATING:
-            path = re.sub(r"\{[^}]+\}", "test-id", route.path)
-            routes.add((method, path))
+    for path, ops in app.openapi()["paths"].items():
+        for method in ops:
+            if method.upper() in MUTATING:
+                routes.add((method.upper(), re.sub(r"\{[^}]+\}", "test-id", path)))
     return sorted(routes)
 
 

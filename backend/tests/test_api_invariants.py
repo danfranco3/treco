@@ -4,7 +4,6 @@ keys, and the (currently open) dashboard auth boundary."""
 import hashlib
 
 import pytest
-from fastapi.routing import APIRoute
 
 from app.main import app
 from app.models.agent import Agent
@@ -13,19 +12,24 @@ from app.models.ticket import Ticket
 from tests.shared import TestSessionLocal
 
 
-def _api_routes(prefix: str) -> list[APIRoute]:
+def _openapi_ops(prefix: str) -> list[tuple[str, str, dict]]:
+    """(path, METHOD, operation) triples from the OpenAPI schema — stable
+    across FastAPI/Starlette versions, unlike router internals."""
     return [
-        r for r in app.routes
-        if isinstance(r, APIRoute) and r.path.startswith(prefix)
+        (path, method.upper(), op)
+        for path, ops in app.openapi()["paths"].items()
+        if path.startswith(prefix)
+        for method, op in ops.items()
     ]
 
 
 class TestEventStreamAppendOnly:
     def test_no_update_or_delete_route_exists_for_events(self):
-        for route in _api_routes("/api/events"):
-            forbidden = route.methods & {"PUT", "PATCH", "DELETE"}
-            assert not forbidden, (
-                f"agent_events must stay append-only; found {forbidden} at {route.path}"
+        ops = _openapi_ops("/api/events")
+        assert ops, "event routes missing from the schema — enumeration broke"
+        for path, method, _ in ops:
+            assert method not in {"PUT", "PATCH", "DELETE"}, (
+                f"agent_events must stay append-only; found {method} at {path}"
             )
 
     def test_event_model_has_no_updated_at_column(self):
@@ -122,15 +126,25 @@ class TestTicketBodyImmutable:
 
     def test_no_route_accepts_a_body_field_update(self):
         """No ticket route request model exposes `body` as writable input."""
-        for route in _api_routes("/api/tickets"):
-            if not route.methods & {"POST", "PUT", "PATCH"}:
+        spec = app.openapi()
+        schemas = spec.get("components", {}).get("schemas", {})
+        checked = 0
+        for path, method, op in _openapi_ops("/api/tickets"):
+            if method not in {"POST", "PUT", "PATCH"}:
                 continue
-            body_field = getattr(route, "body_field", None)
-            if body_field is None:
+            schema = (
+                op.get("requestBody", {})
+                .get("content", {})
+                .get("application/json", {})
+                .get("schema", {})
+            )
+            ref = schema.get("$ref", "")
+            if not ref:
                 continue
-            model = getattr(body_field.type_, "model_fields", None)
-            if model:
-                assert "body" not in model, f"{route.path} accepts raw body input"
+            checked += 1
+            props = schemas.get(ref.rsplit("/", 1)[-1], {}).get("properties", {})
+            assert "body" not in props, f"{method} {path} accepts raw body input"
+        assert checked > 0, "no ticket request models found — enumeration broke"
 
 
 class TestApiKeyStorage:
